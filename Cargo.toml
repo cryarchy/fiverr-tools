@@ -1,0 +1,11 @@
+[package]
+edition = "2024"
+name = "fiverr-message-checker"
+version = "0.1.0"
+
+[dependencies]
+anyhow = "1.0"
+headless_chrome = "1.0"
+regex = {version = "1.11.1"}
+thiserror = "2.0.12"
+tokio = {version = "1", features = ["full"]}
