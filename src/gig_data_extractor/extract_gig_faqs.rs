@@ -88,38 +88,4 @@ impl GigDataExtractor {
     ) -> Result<impl IntoIterator<Item = Result<GigFaq, GigFaqError>>, GigFaqError> {
         GigFaqIterator::new(self.tab.clone())
     }
-
-    pub fn _extract_gig_faqs(&self) -> Result<Vec<GigFaq>, GigFaqError> {
-        let gig_faq_els_selector = Selector::new(
-            "#main-wrapper > .main-content .gig-page > .main article.faq-collapsible".to_owned(),
-        );
-        let gig_faq_els = self
-            .tab
-            .find_elements(gig_faq_els_selector.as_ref())
-            .map_err(Self::map_err_fn(gig_faq_els_selector.to_owned()))?;
-
-        let mut gig_faqs = Vec::new();
-        for (i, gig_faq_el) in gig_faq_els.into_iter().enumerate() {
-            let get_child_selector =
-                |child_selector: &str| gig_faq_els_selector.nth_child(i).append(child_selector);
-
-            let question_selector = ".faq-collapsible-title p";
-            let question = gig_faq_el
-                .find_element(question_selector)
-                .map_err(Self::map_err_fn(get_child_selector(question_selector)))?
-                .get_inner_text()
-                .map_err(Self::map_err_fn(get_child_selector(question_selector)))?;
-
-            let answer_selector = ".faq-collapsible-content p";
-            let answer = gig_faq_el
-                .find_element(answer_selector)
-                .map_err(Self::map_err_fn(get_child_selector(answer_selector)))?
-                .get_inner_text()
-                .map_err(Self::map_err_fn(get_child_selector(answer_selector)))?;
-
-            gig_faqs.push(GigFaq { question, answer });
-        }
-
-        Ok(gig_faqs)
-    }
 }
