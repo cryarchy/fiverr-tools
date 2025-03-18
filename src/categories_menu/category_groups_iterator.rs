@@ -1,19 +1,15 @@
-use std::sync::Arc;
+use crate::{selector::Selector, wrapped::WrappedTab};
 
-use headless_chrome::Tab;
-
-use crate::{selector::Selector, wrapped_element::WrappedElement};
-
-use super::{category_group_element::CategoryGroupElement, error::CategoriesMenuError};
+use super::category_group_element::CategoryGroupElement;
 
 pub struct CategoryGroupsIterator<'a> {
-    tab: &'a Arc<Tab>,
+    tab: &'a WrappedTab,
     current_index: usize,
     base_selector: Selector,
 }
 
 impl<'a> CategoryGroupsIterator<'a> {
-    pub fn new(tab: &'a Arc<Tab>, base_selector: Selector) -> Self {
+    pub fn new(tab: &'a WrappedTab, base_selector: Selector) -> Self {
         Self {
             base_selector,
             tab,
@@ -27,14 +23,12 @@ impl<'a> CategoryGroupsIterator<'a> {
             .nth_child(self.current_index)
     }
 
-    fn _next(&mut self) -> Result<Option<CategoryGroupElement<'a>>, CategoriesMenuError> {
+    fn _next(&mut self) -> Result<Option<CategoryGroupElement<'a>>, crate::Error> {
         let selector = self.selector();
-        match self.tab.find_element(selector.as_ref()) {
+        match self.tab.find_element(&selector) {
             Ok(element) => {
-                let wrapped_element = WrappedElement::new(element, selector.to_owned());
-
                 self.current_index += 1;
-                Ok(Some(CategoryGroupElement::new(self.tab, wrapped_element)))
+                Ok(Some(CategoryGroupElement::new(self.tab, element)))
             }
             Err(e) => {
                 println!("{e} : {selector}");
@@ -45,7 +39,7 @@ impl<'a> CategoryGroupsIterator<'a> {
 }
 
 impl<'a> Iterator for CategoryGroupsIterator<'a> {
-    type Item = Result<CategoryGroupElement<'a>, CategoriesMenuError>;
+    type Item = Result<CategoryGroupElement<'a>, crate::Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
         match self._next() {

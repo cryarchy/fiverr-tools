@@ -1,12 +1,9 @@
-use std::sync::Arc;
-
-use headless_chrome::Tab;
+use crate::wrapped::WrappedTab;
 
 use super::{
     category_group_categories_iterator::CategoryGroupCategoriesIterator,
     category_group_element::CategoryGroupElement, category_groups_iterator::CategoryGroupsIterator,
-    error::CategoriesMenuError, main_categories_element::MainCategoryElement,
-    main_categories_iterator::MainCategoriesIterator,
+    main_categories_element::MainCategoryElement, main_categories_iterator::MainCategoriesIterator,
 };
 
 #[derive(Debug)]
@@ -18,7 +15,7 @@ pub struct Category {
 }
 
 pub struct CategoriesIterator<'a> {
-    tab: &'a Arc<Tab>,
+    tab: &'a WrappedTab,
     main_categories_iterator: MainCategoriesIterator<'a>,
     current_main_category: MainCategoryElement<'a>,
     category_groups_iterator: CategoryGroupsIterator<'a>,
@@ -27,12 +24,12 @@ pub struct CategoriesIterator<'a> {
 }
 
 impl<'a> CategoriesIterator<'a> {
-    pub fn new(tab: &'a Arc<Tab>) -> Result<Self, CategoriesMenuError> {
+    pub fn new(tab: &'a WrappedTab) -> Result<Self, crate::Error> {
         let mut main_categories_iterator = MainCategoriesIterator::new(tab);
         let current_main_category =
             main_categories_iterator
                 .next()
-                .ok_or(CategoriesMenuError::Unexpected(
+                .ok_or(crate::Error::Unexpected(
                     "Empty main categories iterator".to_owned(),
                 ))??;
         let mut category_groups_iterator =
@@ -40,7 +37,7 @@ impl<'a> CategoriesIterator<'a> {
         let current_category_group =
             category_groups_iterator
                 .next()
-                .ok_or(CategoriesMenuError::Unexpected(
+                .ok_or(crate::Error::Unexpected(
                     "Empty category group iterator".to_owned(),
                 ))??;
         let category_group_categories_iterator =
@@ -55,7 +52,7 @@ impl<'a> CategoriesIterator<'a> {
         })
     }
 
-    fn _next(&mut self) -> Result<Option<Category>, CategoriesMenuError> {
+    fn _next(&mut self) -> Result<Option<Category>, crate::Error> {
         match self.category_group_categories_iterator.next() {
             Some(category) => {
                 let category = category?;
@@ -92,7 +89,7 @@ impl<'a> CategoriesIterator<'a> {
 }
 
 impl Iterator for CategoriesIterator<'_> {
-    type Item = Result<Category, CategoriesMenuError>;
+    type Item = Result<Category, crate::Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
         match self._next() {

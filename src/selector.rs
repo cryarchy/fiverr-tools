@@ -1,3 +1,5 @@
+use std::ops::Deref;
+
 #[derive(Debug, Clone)]
 pub struct Selector(String);
 
@@ -15,9 +17,11 @@ impl Selector {
     }
 }
 
-impl AsRef<str> for Selector {
-    fn as_ref(&self) -> &str {
-        self.0.as_str()
+impl Deref for Selector {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }
 
@@ -33,12 +37,7 @@ mod tests {
 
     #[test]
     fn selector() {
-        assert_eq!(
-            Selector::new("li".to_owned())
-                .nth_child(2)
-                .append("a")
-                .as_ref(),
-            "li:nth-child(2) a"
-        )
+        let selector: &str = &Selector::new("li".to_owned()).nth_child(2).append("a");
+        assert_eq!(selector, "li:nth-child(2) a")
     }
 }

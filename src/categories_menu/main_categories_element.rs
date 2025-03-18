@@ -1,21 +1,15 @@
-use std::sync::Arc;
-
-use headless_chrome::Tab;
-
 use crate::{
     selector::Selector,
-    wrapped_element::{WrappedElement, WrappedElementError},
+    wrapped::{WrappedElement, WrappedTab},
 };
 
-use super::error::CategoriesMenuError;
-
 pub struct MainCategoryElement<'a> {
-    tab: &'a Arc<Tab>,
+    tab: &'a WrappedTab,
     element: WrappedElement<'a>,
 }
 
 impl<'a> MainCategoryElement<'a> {
-    pub(super) fn new(tab: &'a Arc<Tab>, element: WrappedElement<'a>) -> Self {
+    pub(super) fn new(tab: &'a WrappedTab, element: WrappedElement<'a>) -> Self {
         Self { tab, element }
     }
 
@@ -31,12 +25,11 @@ impl<'a> MainCategoryElement<'a> {
         self.element.selector().append("a")
     }
 
-    pub fn name(&self) -> Result<String, CategoriesMenuError> {
+    pub fn name(&self) -> Result<String, crate::Error> {
         let selector = self.anchor_selector();
         self.tab
-            .find_element(selector.as_ref())
-            .map_err(|e| WrappedElementError::markup_interaction(e, &selector))?
+            .find_element(&selector)?
             .get_inner_text()
-            .map_err(|e| WrappedElementError::markup_interaction(e, &selector).into())
+            .map_err(|e| e.into())
     }
 }

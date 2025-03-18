@@ -1,17 +1,14 @@
-mod error;
-
-use error::SiteNavError;
-use headless_chrome::{Element, Tab};
-use std::sync::Arc;
-
-use crate::selector::Selector;
+use crate::{
+    selector::Selector,
+    wrapped::{WrappedElement, WrappedTab},
+};
 
 pub struct SiteNav {
-    tab: Arc<Tab>,
+    tab: WrappedTab,
 }
 
 impl SiteNav {
-    pub fn new(tab: Arc<Tab>) -> Self {
+    pub fn new(tab: WrappedTab) -> Self {
         Self { tab }
     }
 
@@ -19,17 +16,17 @@ impl SiteNav {
         Selector::new("#Header a.site-logo".to_owned())
     }
 
-    fn get_home_button(&self) -> Result<Element, SiteNavError> {
+    fn get_home_button(&self) -> Result<WrappedElement, crate::Error> {
         let home_button_selector = Self::home_button_selector();
         self.tab
-            .find_element(home_button_selector.as_ref())
-            .map_err(|e| SiteNavError::markup_interaction(e, &home_button_selector))
+            .find_element(&home_button_selector)
+            .map_err(|e| e.into())
     }
 
-    pub fn go_home(&self) -> Result<(), SiteNavError> {
+    pub fn go_home(&self) -> Result<(), crate::Error> {
         self.get_home_button()?
             .click()
             .map(|_| ())
-            .map_err(|e| SiteNavError::markup_interaction(e, &Self::home_button_selector()))
+            .map_err(|e| e.into())
     }
 }

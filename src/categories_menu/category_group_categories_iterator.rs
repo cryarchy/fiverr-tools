@@ -1,10 +1,4 @@
-use std::sync::Arc;
-
-use headless_chrome::Tab;
-
-use crate::{selector::Selector, wrapped_element::WrappedElement};
-
-use super::error::CategoriesMenuError;
+use crate::{selector::Selector, wrapped::WrappedTab};
 
 #[derive(Debug)]
 pub struct Category {
@@ -13,13 +7,13 @@ pub struct Category {
 }
 
 pub struct CategoryGroupCategoriesIterator<'a> {
-    tab: &'a Arc<Tab>,
+    tab: &'a WrappedTab,
     current_index: usize,
     base_selector: Selector,
 }
 
 impl<'a> CategoryGroupCategoriesIterator<'a> {
-    pub fn new(tab: &'a Arc<Tab>, base_selector: Selector) -> Self {
+    pub fn new(tab: &'a WrappedTab, base_selector: Selector) -> Self {
         Self {
             base_selector,
             tab,
@@ -34,13 +28,12 @@ impl<'a> CategoryGroupCategoriesIterator<'a> {
             .append("a")
     }
 
-    fn _next(&mut self) -> Result<Option<Category>, CategoriesMenuError> {
+    fn _next(&mut self) -> Result<Option<Category>, crate::Error> {
         let selector = self.get_category_el_selector();
-        match self.tab.find_element(selector.as_ref()) {
+        match self.tab.find_element(&selector) {
             Ok(element) => {
-                let wrapped_element = WrappedElement::new(element, selector.to_owned());
-                let category_name = wrapped_element.get_inner_text()?;
-                let href = wrapped_element.get_expected_attribute_value("href")?;
+                let category_name = element.get_inner_text()?;
+                let href = element.get_expected_attribute_value("href")?;
 
                 self.current_index += 1;
                 Ok(Some(Category {
@@ -57,7 +50,7 @@ impl<'a> CategoryGroupCategoriesIterator<'a> {
 }
 
 impl Iterator for CategoryGroupCategoriesIterator<'_> {
-    type Item = Result<Category, CategoriesMenuError>;
+    type Item = Result<Category, crate::Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
         match self._next() {

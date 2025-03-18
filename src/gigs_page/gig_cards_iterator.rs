@@ -4,10 +4,8 @@ use headless_chrome::Tab;
 
 use crate::{
     markup_interaction_error::MarkupInteractionError, selector::Selector,
-    string_cleaner::STRING_CLEANER, wrapped_element::WrappedElementError,
+    string_cleaner::STRING_CLEANER, wrapped::Error,
 };
-
-use super::GigsPageError;
 
 #[derive(Debug)]
 pub struct GigCard {
@@ -38,7 +36,7 @@ impl<'a> GigCardsIterator<'a> {
         )
     }
 
-    fn _next(&mut self) -> Result<Option<GigCard>, GigsPageError> {
+    fn _next(&mut self) -> Result<Option<GigCard>, crate::Error> {
         loop {
             let selector = Self::selector().nth_child(self.current_index);
             let url_selector = selector.append(r#"a[aria-label="Go to gig"]"#);
@@ -55,7 +53,7 @@ impl<'a> GigCardsIterator<'a> {
             let url = gig_anchor
                 .get_attribute_value("href")
                 .map_err(|e| MarkupInteractionError::new(e, selector.to_string()))?
-                .ok_or(WrappedElementError::AttributeNotFound(
+                .ok_or(Error::AttributeNotFound(
                     "href".to_owned(),
                     selector.to_string(),
                 ))?;
@@ -89,7 +87,7 @@ impl<'a> GigCardsIterator<'a> {
 }
 
 impl Iterator for GigCardsIterator<'_> {
-    type Item = Result<GigCard, GigsPageError>;
+    type Item = Result<GigCard, crate::Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
         match self._next() {

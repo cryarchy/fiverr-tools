@@ -1,21 +1,14 @@
-use std::sync::Arc;
+use crate::{selector::Selector, wrapped::WrappedTab};
 
-use headless_chrome::Tab;
-
-use crate::{
-    selector::Selector,
-    wrapped_element::{WrappedElement, WrappedElementError},
-};
-
-use super::{error::CategoriesMenuError, main_categories_element::MainCategoryElement};
+use super::main_categories_element::MainCategoryElement;
 
 pub struct MainCategoriesIterator<'a> {
-    tab: &'a Arc<Tab>,
+    tab: &'a WrappedTab,
     current_index: usize,
 }
 
 impl<'a> MainCategoriesIterator<'a> {
-    pub fn new(tab: &'a Arc<Tab>) -> Self {
+    pub fn new(tab: &'a WrappedTab) -> Self {
         Self {
             tab,
             current_index: 1,
@@ -30,24 +23,17 @@ impl<'a> MainCategoriesIterator<'a> {
         Selector::new(r#"#CategoriesMenu nav .right"#.to_owned())
     }
 
-    fn _next(&mut self) -> Result<Option<MainCategoryElement<'a>>, CategoriesMenuError> {
+    fn _next(&mut self) -> Result<Option<MainCategoryElement<'a>>, crate::Error> {
         let selector = Self::selector().nth_child(self.current_index);
-        match self.tab.find_element(selector.as_ref()) {
+        match self.tab.find_element(&selector) {
             Ok(element) => {
-                let wrapped_element = WrappedElement::new(element, selector.to_owned());
-                wrapped_element.move_mouse_over()?;
-                let main_category_element = MainCategoryElement::new(self.tab, wrapped_element);
+                element.move_mouse_over()?;
+                let main_category_element = MainCategoryElement::new(self.tab, element);
                 let panel_selector = main_category_element.menu_panel_selector();
-                if self.tab.wait_for_element(panel_selector.as_ref()).is_err() {
+                if self.tab.wait_for_element(&panel_selector).is_err() {
                     let right_nav_btn_selector = Self::right_nav_btn_selector();
-                    self.tab
-                        .find_element(right_nav_btn_selector.as_ref())
-                        .map_err(|e| {
-                            WrappedElementError::markup_interaction(e, &right_nav_btn_selector)
-                        })?;
-                    self.tab
-                        .wait_for_element(panel_selector.as_ref())
-                        .map_err(|e| WrappedElementError::markup_interaction(e, &panel_selector))?;
+                    self.tab.find_element(&right_nav_btn_selector)?;
+                    self.tab.wait_for_element(&panel_selector)?;
                 }
 
                 self.current_index += 1;
@@ -62,7 +48,7 @@ impl<'a> MainCategoriesIterator<'a> {
 }
 
 impl<'a> Iterator for MainCategoriesIterator<'a> {
-    type Item = Result<MainCategoryElement<'a>, CategoriesMenuError>;
+    type Item = Result<MainCategoryElement<'a>, crate::Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
         match self._next() {

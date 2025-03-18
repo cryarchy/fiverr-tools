@@ -3,18 +3,20 @@
 // and update the websocket URL below
 
 mod categories_menu;
+mod error;
 mod gig_page;
 mod gigs_page;
 mod markup_interaction_error;
 mod selector;
 mod site_nav;
 mod string_cleaner;
-mod wrapped_element;
+mod wrapped;
 
 use std::{thread::sleep, time::Duration};
 
 use anyhow::Result;
 use categories_menu::CategoriesMenu;
+use error::Error;
 use gig_page::GigPage;
 use gigs_page::GigsPage;
 use headless_chrome::Browser;
