@@ -1,6 +1,6 @@
-use crate::selector::Selector;
+use crate::{markup_interaction_error::MarkupInteractionError, selector::Selector};
 
-use super::{GigDataExtractor, error::MarkupInteractionError};
+use super::GigPage;
 
 #[derive(Debug, thiserror::Error)]
 pub enum GigMetadataError {
@@ -14,8 +14,8 @@ pub struct GigMetadata {
     values: Vec<String>,
 }
 
-impl GigDataExtractor {
-    pub fn extract_gig_metadata(&self) -> Result<Vec<GigMetadata>, GigMetadataError> {
+impl GigPage {
+    pub fn get_gig_metadata(&self) -> Result<Vec<GigMetadata>, GigMetadataError> {
         let metadata_els_selector = Selector::new("#main-wrapper > .main-content .gig-page > .main > .gig-description > .metadata > .metadata-attribute".to_owned());
         let metadata_els = self
             .tab

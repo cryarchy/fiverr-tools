@@ -1,9 +1,10 @@
 use crate::{
+    markup_interaction_error::MarkupInteractionError,
     selector::Selector,
     string_cleaner::{STRING_CLEANER, StringCleanerError},
 };
 
-use super::{GigDataExtractor, error::MarkupInteractionError};
+use super::GigPage;
 
 #[derive(Debug, thiserror::Error)]
 pub enum SellerStatsError {
@@ -19,8 +20,8 @@ pub struct SellerStat {
     value: String,
 }
 
-impl GigDataExtractor {
-    pub fn extract_seller_stats(&self) -> Result<Vec<SellerStat>, SellerStatsError> {
+impl GigPage {
+    pub fn get_seller_stats(&self) -> Result<Vec<SellerStat>, SellerStatsError> {
         let seller_stats_selector = Selector::new(
             "#main-wrapper > .main-content .gig-page > .main .seller-card .user-stats > li"
                 .to_owned(),

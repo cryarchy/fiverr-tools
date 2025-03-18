@@ -1,11 +1,12 @@
 use std::collections::HashMap;
 
 use crate::{
+    markup_interaction_error::MarkupInteractionError,
     selector::Selector,
     string_cleaner::{STRING_CLEANER, StringCleanerError},
 };
 
-use super::{GigDataExtractor, error::MarkupInteractionError};
+use super::GigPage;
 
 #[derive(Debug, thiserror::Error)]
 pub enum GigPackagesError {
@@ -27,8 +28,8 @@ pub struct GigPackage {
     delivery_time: Option<String>,
 }
 
-impl GigDataExtractor {
-    pub fn extract_gig_packages(&self) -> Result<Vec<GigPackage>, GigPackagesError> {
+impl GigPage {
+    pub fn get_gig_packages(&self) -> Result<Vec<GigPackage>, GigPackagesError> {
         let gig_package_header_els_selector = Selector::new("#main-wrapper > .main-content .gig-page > .main .gig-page-packages-table table tbody tr.package-type th".to_owned());
         let gig_packages_header_els = self
             .tab

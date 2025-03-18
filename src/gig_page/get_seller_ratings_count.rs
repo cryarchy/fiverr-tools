@@ -1,9 +1,10 @@
 use crate::{
+    markup_interaction_error::MarkupInteractionError,
     selector::Selector,
     string_cleaner::{STRING_CLEANER, StringCleanerError},
 };
 
-use super::{GigDataExtractor, error::MarkupInteractionError};
+use super::GigPage;
 
 #[derive(Debug, thiserror::Error)]
 pub enum SellerRatingsCountError {
@@ -13,8 +14,8 @@ pub enum SellerRatingsCountError {
     StringCleaner(#[from] StringCleanerError),
 }
 
-impl GigDataExtractor {
-    pub fn extract_seller_ratings_count(&self) -> Result<usize, SellerRatingsCountError> {
+impl GigPage {
+    pub fn get_seller_ratings_count(&self) -> Result<usize, SellerRatingsCountError> {
         let ratings_count_selector = Selector::new(
             "#main-wrapper > .main-content .gig-page > .main .seller-card .ratings-count > span"
                 .to_owned(),

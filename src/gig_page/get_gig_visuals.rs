@@ -1,8 +1,8 @@
 use std::{thread::sleep, time::Duration};
 
-use crate::selector::Selector;
+use crate::{markup_interaction_error::MarkupInteractionError, selector::Selector};
 
-use super::{GigDataExtractor, error::MarkupInteractionError};
+use super::GigPage;
 
 #[derive(Debug, thiserror::Error)]
 pub enum GigVisualsError {
@@ -22,8 +22,8 @@ pub enum GalleryVisual {
     Image(String),
 }
 
-impl GigDataExtractor {
-    pub fn extract_gig_visuals(&self) -> Result<Vec<GalleryVisual>, GigVisualsError> {
+impl GigPage {
+    pub fn get_gig_visuals(&self) -> Result<Vec<GalleryVisual>, GigVisualsError> {
         let close_button_selector = Selector::new(".modal-package .modal-close".to_owned());
         if let Ok(close_button_el) = self.tab.find_element(close_button_selector.as_ref()) {
             close_button_el

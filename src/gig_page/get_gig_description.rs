@@ -1,6 +1,6 @@
-use crate::selector::Selector;
+use crate::{markup_interaction_error::MarkupInteractionError, selector::Selector};
 
-use super::{GigDataExtractor, error::MarkupInteractionError};
+use super::GigPage;
 
 #[derive(Debug, thiserror::Error)]
 pub enum GigDescriptionError {
@@ -8,8 +8,8 @@ pub enum GigDescriptionError {
     MarkupInteraction(#[from] MarkupInteractionError),
 }
 
-impl GigDataExtractor {
-    pub fn extract_gig_description(&self) -> Result<String, GigDescriptionError> {
+impl GigPage {
+    pub fn get_gig_description(&self) -> Result<String, GigDescriptionError> {
         let selector = Selector::new("#main-wrapper > .main-content .gig-page > .main > .gig-description > .description-wrapper > .description-content".to_owned());
         let description = self
             .tab

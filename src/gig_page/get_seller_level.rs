@@ -1,9 +1,10 @@
 use crate::{
+    markup_interaction_error::MarkupInteractionError,
     selector::Selector,
     string_cleaner::{STRING_CLEANER, StringCleanerError},
 };
 
-use super::{GigDataExtractor, error::MarkupInteractionError};
+use super::GigPage;
 
 #[derive(Debug, thiserror::Error)]
 pub enum SellerLevelError {
@@ -15,8 +16,8 @@ pub enum SellerLevelError {
     Unexpected(String),
 }
 
-impl GigDataExtractor {
-    pub fn extract_seller_level(&self) -> Result<String, SellerLevelError> {
+impl GigPage {
+    pub fn get_seller_level(&self) -> Result<String, SellerLevelError> {
         let seller_level_selector = Selector::new("#main-wrapper > .main-content .gig-page > .main .seller-card div:has(.rating-score) div:has(p) > p".to_owned());
         let seller_level_els = self
             .tab

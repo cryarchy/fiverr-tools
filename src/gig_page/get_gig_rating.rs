@@ -1,6 +1,6 @@
-use crate::selector::Selector;
+use crate::{markup_interaction_error::MarkupInteractionError, selector::Selector};
 
-use super::{GigDataExtractor, error::MarkupInteractionError};
+use super::GigPage;
 
 #[derive(Debug, thiserror::Error)]
 pub enum GigRatingError {
@@ -8,8 +8,8 @@ pub enum GigRatingError {
     MarkupInteractionError(#[from] MarkupInteractionError),
 }
 
-impl GigDataExtractor {
-    pub fn extract_gig_rating(&self) -> Result<String, GigRatingError> {
+impl GigPage {
+    pub fn get_gig_rating(&self) -> Result<String, GigRatingError> {
         let selector = Selector::new("#main-wrapper > .main-content .gig-page > .main > .gig-overview > .seller-overview div:has(button) > strong".to_owned());
         let rating_el = self
             .tab

@@ -2,19 +2,29 @@
 //     $ google-chrome --remote-debugging-port=9222 --user-data-dir="/tmp/chrome_dev"
 // and update the websocket URL below
 
-mod gig_data_extractor;
+mod categories_menu;
+mod gig_page;
+mod gigs_page;
+mod markup_interaction_error;
 mod selector;
+mod site_nav;
 mod string_cleaner;
+mod wrapped_element;
+
+use std::{thread::sleep, time::Duration};
 
 use anyhow::Result;
-use gig_data_extractor::GigDataExtractor;
+use categories_menu::CategoriesMenu;
+use gig_page::GigPage;
+use gigs_page::GigsPage;
 use headless_chrome::Browser;
+use site_nav::SiteNav;
 
 #[tokio::main]
 async fn main() -> Result<()> {
     // WebSocket debug URL - typically obtained from Chrome's DevTools or via CDP
     let debug_ws_url =
-        "ws://127.0.0.1:9222/devtools/browser/5002c20c-1355-4fb6-add9-82f413072fc9".to_string();
+        "ws://127.0.0.1:9222/devtools/browser/f848262a-6a8d-4c09-8faf-470b1ab025f6".to_string();
 
     // Connect to an existing browser using its WebSocket debug URL
     let browser = Browser::connect(debug_ws_url)?;
@@ -30,6 +40,7 @@ async fn main() -> Result<()> {
     for tab in tabs.iter() {
         if tab.get_url().contains("fiverr") {
             fiverr_tab = Some(tab);
+            break;
         }
     }
 
@@ -37,58 +48,65 @@ async fn main() -> Result<()> {
 
     println!("Fiverr tab title: {}", fiverr_tab.get_title()?);
 
-    let gig_data_extractor = GigDataExtractor::new((*fiverr_tab).clone());
+    // let page_nav = SiteNav::new((*fiverr_tab).clone());
 
-    // println!("Gig title: {}", gig_data_extractor.extract_title()?);
-    // println!("Rating: {}", gig_data_extractor.extract_gig_rating()?);
-    // println!(
-    //     "Reviews count: {}",
-    //     gig_data_extractor.extract_gig_reviews_count()?
-    // );
-    // println!(
-    //     "Description: {}",
-    //     gig_data_extractor.extract_gig_description()?
-    // );
+    // page_nav.go_home()?;
+
+    // let categories_menu = CategoriesMenu::new((*fiverr_tab).clone());
+    // for category in categories_menu.get_gig_categories()? {
+    //     let category = category?;
+    //     println!("{}", category.main_category);
+    //     println!("- {}", category.category_group);
+    //     println!("    - {} ({})", category.name, category.url);
+    // }
+
+    let gigs_page = GigsPage::new((*fiverr_tab).clone());
+    gigs_page.go_to_page(3)?;
+
+    sleep(Duration::from_secs(5));
+
+    let gigs_page = GigsPage::new((*fiverr_tab).clone());
+    gigs_page.go_to_page(15)?;
+
+    // let gig_page = GigPage::new((*fiverr_tab).clone());
+
+    // println!("Gig title: {}", gig_page.get_title()?);
+    // println!("Rating: {}", gig_page.get_gig_rating()?);
+    // println!("Reviews count: {}", gig_page.get_gig_reviews_count()?);
+    // println!("Description: {}", gig_page.get_gig_description()?);
     // println!("Metadata:");
-    // let gig_metadata = gig_data_extractor.extract_gig_metadata()?;
+    // let gig_metadata = gig_page.get_gig_metadata()?;
     // for entry in gig_metadata {
     //     println!("\t {:?}", entry);
     // }
-    // println!(
-    //     "Seller rating: {}",
-    //     gig_data_extractor.extract_seller_rating()?
-    // );
+    // println!("Seller rating: {}", gig_page.get_seller_rating()?);
     // println!(
     //     "Seller ratings count: {}",
-    //     gig_data_extractor.extract_seller_ratings_count()?
+    //     gig_page.get_seller_ratings_count()?
     // );
-    // println!(
-    //     "Seller level: {}",
-    //     gig_data_extractor.extract_seller_level()?
-    // );
+    // println!("Seller level: {}", gig_page.get_seller_level()?);
     // println!("Seller stats:");
-    // let seller_stats = gig_data_extractor.extract_seller_stats()?;
+    // let seller_stats = gig_page.get_seller_stats()?;
     // for entry in seller_stats {
     //     println!("\t {:?}", entry);
     // }
-    // println!(
-    //     "Seller description: {}",
-    //     gig_data_extractor.extract_seller_description()?
-    // );
-    // let gallery_visuals = gig_data_extractor.extract_gig_visuals()?;
+    // println!("Seller description: {}", gig_page.get_seller_description()?);
+    // let gallery_visuals = gig_page.get_gig_visuals()?;
     // println!("Gallery visuals:");
     // for entry in gallery_visuals {
     //     println!("\t {:?}", entry);
     // }
     // println!("Gig packages:");
-    // let gig_packages = gig_data_extractor.extract_gig_packages()?;
+    // let gig_packages = gig_page.get_gig_packages()?;
     // println!("{:#?}", gig_packages);
-    println!("Gig FAQs:");
-    for result in gig_data_extractor.extract_gig_faqs()? {
-        println!("{:#?}", result?);
-    }
+    // println!("Gig FAQs:");
+    // for result in gig_page.get_gig_faqs()? {
+    //     println!("{:#?}", result?);
+    // }
     // println!("Gig reviews:");
-    // let gig_reviews = gig_data_extractor.extract_gig_reviews()?;
-    // println!("{:#?}", gig_reviews);
+    // for gig_review_result in gig_page.get_gig_reviews()? {
+    //     println!("{:#?}", gig_review_result?);
+    //     break;
+    // }
     Ok(())
 }

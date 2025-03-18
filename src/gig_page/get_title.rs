@@ -1,6 +1,6 @@
-use crate::selector::Selector;
+use crate::{markup_interaction_error::MarkupInteractionError, selector::Selector};
 
-use super::{GigDataExtractor, error::MarkupInteractionError};
+use super::GigPage;
 
 #[derive(Debug, thiserror::Error)]
 pub enum TitleError {
@@ -8,8 +8,8 @@ pub enum TitleError {
     MarkupInteraction(#[from] MarkupInteractionError),
 }
 
-impl GigDataExtractor {
-    pub fn extract_title(&self) -> Result<String, TitleError> {
+impl GigPage {
+    pub fn get_title(&self) -> Result<String, TitleError> {
         let title_selector = Selector::new(
             "#main-wrapper > .main-content .gig-page > .main > .gig-overview > h1".to_owned(),
         );

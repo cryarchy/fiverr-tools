@@ -2,9 +2,9 @@ use std::sync::Arc;
 
 use headless_chrome::Tab;
 
-use crate::selector::Selector;
+use crate::{markup_interaction_error::MarkupInteractionError, selector::Selector};
 
-use super::{GigDataExtractor, error::MarkupInteractionError};
+use super::GigPage;
 
 #[derive(Debug, thiserror::Error)]
 pub enum GigFaqError {
@@ -48,7 +48,7 @@ impl Iterator for GigFaqIterator {
                     .to_owned(),
             )
             .nth_child(mut_self.current_index);
-            mut_self.current_index += 1;
+
             if mut_self
                 .tab
                 .find_element(gig_faq_els_selector.as_ref())
@@ -73,6 +73,7 @@ impl Iterator for GigFaqIterator {
                 .get_inner_text()
                 .map_err(|e| GigFaqError::markup_interaction(e, answer_selector.to_string()))?;
 
+            mut_self.current_index += 1;
             Ok(Some(GigFaq { question, answer }))
         }
         match _next(self) {
@@ -82,8 +83,8 @@ impl Iterator for GigFaqIterator {
     }
 }
 
-impl GigDataExtractor {
-    pub fn extract_gig_faqs(
+impl GigPage {
+    pub fn get_gig_faqs(
         &self,
     ) -> Result<impl IntoIterator<Item = Result<GigFaq, GigFaqError>>, GigFaqError> {
         GigFaqIterator::new(self.tab.clone())

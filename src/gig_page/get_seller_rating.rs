@@ -1,6 +1,6 @@
-use crate::selector::Selector;
+use crate::{markup_interaction_error::MarkupInteractionError, selector::Selector};
 
-use super::{GigDataExtractor, error::MarkupInteractionError};
+use super::GigPage;
 
 #[derive(Debug, thiserror::Error)]
 pub enum SellerRatingError {
@@ -8,8 +8,8 @@ pub enum SellerRatingError {
     MarkupInteraction(#[from] MarkupInteractionError),
 }
 
-impl GigDataExtractor {
-    pub fn extract_seller_rating(&self) -> Result<String, SellerRatingError> {
+impl GigPage {
+    pub fn get_seller_rating(&self) -> Result<String, SellerRatingError> {
         let ratings_selector = Selector::new(
             "#main-wrapper > .main-content .gig-page > .main .seller-card .rating-score".to_owned(),
         );
