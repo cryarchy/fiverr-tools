@@ -61,12 +61,11 @@ async fn main() -> Result<()> {
     // }
 
     let gigs_page = GigsPage::new((*fiverr_tab).clone());
-    gigs_page.go_to_page(3)?;
-
-    sleep(Duration::from_secs(5));
-
-    let gigs_page = GigsPage::new((*fiverr_tab).clone());
-    gigs_page.go_to_page(15)?;
+    // gigs_page.go_to_page(3)?;
+    println!("Current page: {}", gigs_page.get_current_page()?);
+    for gig_card in gigs_page.gigs()? {
+        println!("- {}", gig_card?.url);
+    }
 
     // let gig_page = GigPage::new((*fiverr_tab).clone());
 

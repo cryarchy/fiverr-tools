@@ -1,26 +1,28 @@
+mod gig_cards_iterator;
+
 use std::{sync::Arc, time::Duration};
 
+use gig_cards_iterator::GigCardsIterator;
 use headless_chrome::Tab;
 
 use crate::{
     markup_interaction_error::MarkupInteractionError,
     selector::Selector,
     string_cleaner::{STRING_CLEANER, StringCleanerError},
+    wrapped_element::WrappedElementError,
 };
-
-#[derive(Debug)]
-pub struct GigCard {
-    pub url: String,
-    pub page: usize,
-}
 
 pub struct GigsPage {
     tab: Arc<Tab>,
+    minimum_rating: usize,
 }
 
 impl GigsPage {
     pub fn new(tab: Arc<Tab>) -> Self {
-        Self { tab }
+        Self {
+            tab,
+            minimum_rating: 200,
+        }
     }
 
     fn gig_els_selector() -> Selector {
@@ -29,16 +31,78 @@ impl GigsPage {
         )
     }
 
+    pub fn gigs(&self) -> Result<GigCardsIterator<'_>, GigsPageError> {
+        Ok(GigCardsIterator::new(
+            &self.tab,
+            self.get_current_page()?,
+            self.minimum_rating,
+        ))
+    }
+
     // pub fn get_gigs(&self) -> Result<Vec<GigCard>, GigsPageError> {
     //     let selector = Self::gig_els_selector();
-    //     let gig_card_els = self.tab.find_elements(selector.as_ref()).map_err(|e| MarkupInteractionError::new(e, &selector))?;
+    //     let gig_card_els = self
+    //         .tab
+    //         .find_elements(selector.as_ref())
+    //         .map_err(|e| MarkupInteractionError::new(e, selector.to_string()))?;
     //     let mut gig_cards = Vec::with_capacity(gig_card_els.len());
     //     for (i, gig_card_el) in gig_card_els.into_iter().enumerate() {
-    //         let url_selector = selector.nth_child(i + 1).append(r#"a[aria-label="Go to gig"]"#);
-    //         let gig_anchor = self.tab.find_element(url_selector.as_ref()).map_err(|e| MarkupInteractionError::new(e, &selector))?;
-
+    //         let gig_card_el_selector = selector.nth_child(i + 1);
+    //         let url_selector = gig_card_el_selector.append(r#"a[aria-label="Go to gig"]"#);
+    //         let gig_anchor = self
+    //             .tab
+    //             .find_element(url_selector.as_ref())
+    //             .map_err(|e| MarkupInteractionError::new(e, selector.to_string()))?;
+    //         let url = gig_anchor
+    //             .get_attribute_value("href")
+    //             .map_err(|e| MarkupInteractionError::new(e, selector.to_string()))?
+    //             .ok_or(WrappedElementError::AttributeNotFound(
+    //                 "href".to_owned(),
+    //                 selector.to_string(),
+    //             ))?;
+    //         let ratings_count_selector =
+    //             gig_card_el_selector.append(".orca-rating .ratings-count .rating-count-number");
+    //         let ratings_count = self
+    //             .tab
+    //             .find_element(ratings_count_selector.as_ref())
+    //             .map_err(|e| MarkupInteractionError::new(e, selector.to_string()))?
+    //             .get_inner_text()
+    //             .map_err(|e| MarkupInteractionError::new(e, selector.to_string()))?;
+    //         if ratings_count.contains("k") {
+    //             gig_cards.push(GigCard {
+    //                 url,
+    //                 page: self.get_current_page()?,
+    //             })
+    //         } else {
+    //             let ratings_count = STRING_CLEANER.as_usize(&ratings_count)?;
+    //             if ratings_count > self.minimum_rating {
+    //                 gig_cards.push(GigCard {
+    //                     url,
+    //                     page: self.get_current_page()?,
+    //                 })
+    //             }
+    //         }
     //     }
+
+    //     Ok(gig_cards)
     // }
+
+    fn current_page_selector() -> Selector {
+        Selector::new(
+            r#"#main-wrapper .listings-perseus div:has([aria-label="Previous"]) > div > a:not([aria-label="Next"]):not([aria-label="Previous"]):not([href])"#.to_owned(),
+        )
+    }
+
+    pub fn get_current_page(&self) -> Result<usize, GigsPageError> {
+        let selector = Self::current_page_selector();
+        let current_page = self
+            .tab
+            .find_element(selector.as_ref())
+            .map_err(|e| MarkupInteractionError::new(e, selector.to_string()))?
+            .get_inner_text()
+            .map_err(|e| MarkupInteractionError::new(e, selector.to_string()))?;
+        STRING_CLEANER.as_usize(&current_page).map_err(|e| e.into())
+    }
 
     fn page_number_els_selector() -> Selector {
         Selector::new(
@@ -171,4 +235,6 @@ pub enum GigsPageError {
     Unexpected(String),
     #[error("GigsPageError: {0}")]
     StringCleaner(#[from] StringCleanerError),
+    #[error("GigsPageError: {0}")]
+    WrappedElement(#[from] WrappedElementError),
 }
