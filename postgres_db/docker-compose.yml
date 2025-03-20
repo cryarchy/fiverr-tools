@@ -1,0 +1,11 @@
+services:
+    whatido-db:
+        image: postgres
+        container_name: fiverr-message-checker-db
+        env_file:
+            - ./env-vars
+        volumes:
+            - ./data:/var/lib/postgresql/data
+        restart: always
+        ports:
+            - 5433:5432

@@ -13,22 +13,14 @@ mod get_seller_ratings_count;
 mod get_seller_stats;
 mod get_title;
 
-use std::sync::Arc;
-
-use headless_chrome::Tab;
-
-use crate::{markup_interaction_error::MarkupInteractionError, selector::Selector};
+use crate::wrapped::WrappedTab;
 
 pub struct GigPage {
-    tab: Arc<Tab>,
+    tab: WrappedTab,
 }
 
 impl GigPage {
-    pub fn new(tab: Arc<Tab>) -> Self {
+    pub fn new(tab: WrappedTab) -> Self {
         Self { tab }
-    }
-
-    fn map_err_fn(selector: Selector) -> impl FnOnce(anyhow::Error) -> MarkupInteractionError {
-        move |e: anyhow::Error| MarkupInteractionError::new(e, selector.to_string())
     }
 }

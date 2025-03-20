@@ -1,36 +1,20 @@
-use std::sync::Arc;
-
-use headless_chrome::Tab;
-
-use crate::{markup_interaction_error::MarkupInteractionError, selector::Selector};
+use crate::{selector::Selector, wrapped::WrappedTab};
 
 use super::GigPage;
 
-#[derive(Debug, thiserror::Error)]
-pub enum GigFaqError {
-    #[error("GigFaqError: {0}")]
-    MarkupInteraction(#[from] MarkupInteractionError),
-}
-
-impl GigFaqError {
-    fn markup_interaction(e: anyhow::Error, selector: String) -> Self {
-        Self::MarkupInteraction(MarkupInteractionError::new(e, selector))
-    }
-}
-
 #[derive(Debug)]
 pub struct GigFaq {
-    question: String,
-    answer: String,
+    pub question: String,
+    pub answer: String,
 }
 
 pub struct GigFaqIterator {
-    tab: Arc<Tab>,
+    tab: WrappedTab,
     current_index: usize,
 }
 
 impl GigFaqIterator {
-    fn new(tab: Arc<Tab>) -> Result<Self, GigFaqError> {
+    fn new(tab: WrappedTab) -> Result<Self, crate::Error> {
         Ok(Self {
             current_index: 1,
             tab,
@@ -39,39 +23,31 @@ impl GigFaqIterator {
 }
 
 impl Iterator for GigFaqIterator {
-    type Item = Result<GigFaq, GigFaqError>;
+    type Item = Result<GigFaq, crate::Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        fn _next(mut_self: &mut GigFaqIterator) -> Result<Option<GigFaq>, GigFaqError> {
+        fn _next(mut_self: &mut GigFaqIterator) -> Result<Option<GigFaq>, crate::Error> {
             let gig_faq_els_selector = Selector::new(
                 "#main-wrapper > .main-content .gig-page > .main article.faq-collapsible"
                     .to_owned(),
             )
             .nth_child(mut_self.current_index);
 
-            if mut_self
-                .tab
-                .find_element(gig_faq_els_selector.as_ref())
-                .is_err()
-            {
+            if mut_self.tab.find_element(&gig_faq_els_selector).is_err() {
                 return Ok(None);
             }
 
             let question_selector = gig_faq_els_selector.append(".faq-collapsible-title p");
             let question = mut_self
                 .tab
-                .find_element(question_selector.as_ref())
-                .map_err(|e| GigFaqError::markup_interaction(e, question_selector.to_string()))?
-                .get_inner_text()
-                .map_err(|e| GigFaqError::markup_interaction(e, question_selector.to_string()))?;
+                .find_element(&question_selector)?
+                .get_inner_text()?;
 
             let answer_selector = gig_faq_els_selector.append(".faq-collapsible-content p");
             let answer = mut_self
                 .tab
-                .find_element(answer_selector.as_ref())
-                .map_err(|e| GigFaqError::markup_interaction(e, answer_selector.to_string()))?
-                .get_inner_text()
-                .map_err(|e| GigFaqError::markup_interaction(e, answer_selector.to_string()))?;
+                .find_element(&answer_selector)?
+                .get_inner_text()?;
 
             mut_self.current_index += 1;
             Ok(Some(GigFaq { question, answer }))
@@ -86,7 +62,7 @@ impl Iterator for GigFaqIterator {
 impl GigPage {
     pub fn get_gig_faqs(
         &self,
-    ) -> Result<impl IntoIterator<Item = Result<GigFaq, GigFaqError>>, GigFaqError> {
+    ) -> Result<impl IntoIterator<Item = Result<GigFaq, crate::Error>>, crate::Error> {
         GigFaqIterator::new(self.tab.clone())
     }
 }

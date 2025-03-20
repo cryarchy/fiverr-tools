@@ -1,36 +1,17 @@
-use std::{sync::Arc, thread::sleep, time::Duration};
+use std::{ thread::sleep, time::Duration};
 
-use headless_chrome::Tab;
 
-use crate::{markup_interaction_error::MarkupInteractionError,selector::Selector};
+use crate::{selector::Selector, wrapped::WrappedTab};
 
 use super::GigPage;
 
-#[derive(Debug, thiserror::Error)]
-pub enum GigReviewsError {
-    #[error("GigReviewsError: {0}")]
-    MarkupInteraction(#[from] MarkupInteractionError),
-    #[error("GigReviewsError: {0} element not found.")]
-    ElementNotFound(String),
-}
-
-impl GigReviewsError {
-    fn markup_interaction(e: anyhow::Error, selector: String) -> Self {
-        Self::MarkupInteraction(MarkupInteractionError::new(e, selector))
-    }
-
-    fn map_err_fn(selector: Selector) -> impl FnOnce(anyhow::Error) -> Self {
-        move |e: anyhow::Error| GigReviewsError::markup_interaction(e, selector.to_string())
-    }
-}
-
 pub struct GigReviewIterator {
-    tab: Arc<Tab>,
+    tab: WrappedTab,
     current_index: usize,
 }
 
 impl GigReviewIterator {
-    fn new(tab: Arc<Tab>) -> Result<Self, GigReviewsError> {
+    fn new(tab: WrappedTab) -> Result<Self, crate::Error> {
         Ok(Self {
             current_index: 1,
             tab,
@@ -39,99 +20,77 @@ impl GigReviewIterator {
 }
 
 impl Iterator for GigReviewIterator {
-    type Item = Result<GigReview, GigReviewsError>;
+    type Item = Result<GigReview, crate::Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        fn _next(mut_self: &mut GigReviewIterator) -> Result<Option<GigReview>, GigReviewsError> {
+        fn _next(mut_self: &mut GigReviewIterator) -> Result<Option<GigReview>, crate::Error> {
             let gig_review_el_selector = Selector::new(
                 "#main-wrapper > .main-content .gig-page > .main .gig-page-reviews .review-item-component-wrapper".to_owned(),
                 
             ).nth_child(mut_self.current_index);
             let gig_review_el = mut_self
                 .tab
-                .find_element(gig_review_el_selector.as_ref());
+                .find_element(&gig_review_el_selector);
             let Ok(gig_review_el) = gig_review_el else {
                 for _ in 0..3 {
                 let show_more_button_selector = Selector::new("#main-wrapper > .main-content .gig-page > .main .gig-page-reviews .reviews-wrap > div > button".to_owned());
-                match mut_self.tab.find_element(show_more_button_selector.as_ref()) {
+                match mut_self.tab.find_element(&show_more_button_selector) {
                     Ok(show_more_button) => {
                         show_more_button
-                            .click()
-                            .map_err(GigReviewsError::map_err_fn(show_more_button_selector))?;
-                        match mut_self.tab.wait_for_element(gig_review_el_selector.as_ref()) {
+                            .click()?;
+                        match mut_self.tab.wait_for_element(&gig_review_el_selector) {
                             Ok(_) => return _next(mut_self),
                             Err(e) => {
-                                println!("Error waiting for element: '{}' : {e}", gig_review_el_selector);
+                                log::debug!("Error waiting for element: '{}' : {e}", gig_review_el_selector);
                                 continue;
                             }
                         }
                     }
                     Err(e) => {
-                        println!("Show more button find error: {e}");
+                        log::debug!("Show more button find error: {e}");
                         return Ok(None);
                     },
                 }
             }
                 return Ok(None);
             };
-            gig_review_el.scroll_into_view().map_err(GigReviewsError::map_err_fn(
-                gig_review_el_selector.to_owned()
-            ))?;
-            let country_selector = ".country p";
-            let country = gig_review_el
-                .find_element(country_selector)
-                .map_err(GigReviewsError::map_err_fn(
-                    gig_review_el_selector.append(country_selector),
-                ))?
-                .get_inner_text()
-                .map_err(GigReviewsError::map_err_fn(
-                    gig_review_el_selector.append(country_selector),
-                ))?;
+            gig_review_el.scroll_into_view()?;
+            let country_selector = gig_review_el.selector().append(".country p");
+            let country = mut_self.tab
+                .find_element(&country_selector)?
+                .get_inner_text()?;
 
-            let rating_selector = "strong.rating-score";
-            let rating = gig_review_el
-                .find_element(rating_selector)
-                .map_err(GigReviewsError::map_err_fn(
-                    gig_review_el_selector.append(rating_selector),
-                ))?
-                .get_inner_text()
-                .map_err(GigReviewsError::map_err_fn(
-                    gig_review_el_selector.append(rating_selector),
-                ))?;
+            let rating_selector = gig_review_el.selector().append("strong.rating-score");
+            let rating = mut_self.tab
+                .find_element(&rating_selector)?
+                .get_inner_text()?;
 
-            let show_more_button_selector = ".expand-button button";
-            let show_more_button_el = gig_review_el.find_element(show_more_button_selector);
+            let show_more_button_selector = gig_review_el.selector().append(".expand-button button");
+            let show_more_button_el = mut_self.tab.find_element(&show_more_button_selector);
             if let Ok(button) = show_more_button_el {
-                button.click().map_err(GigReviewsError::map_err_fn(
-                    gig_review_el_selector.append(show_more_button_selector),
-                ))?;
+                button.click()?;
                 sleep(Duration::from_millis(500));
             }
 
             let description_selector = gig_review_el_selector.append(".review-description p");
-            let description = gig_review_el
-                .find_element(description_selector.as_ref())
-                .map_err(GigReviewsError::map_err_fn(description_selector.to_owned()))?
-                .get_inner_text()
-                .map_err(GigReviewsError::map_err_fn(description_selector))?;
+            let description = mut_self.tab
+                .find_element(&description_selector)?
+                .get_inner_text()?;
 
-            let price_duration_els_selector = Selector::new(
-                "div:has(p:nth-child(1)):has(p:nth-child(2):last-child) > p:first-child".to_owned(),
+            let price_duration_els_selector = gig_review_el.selector().append(
+                "div:has(p:nth-child(1)):has(p:nth-child(2):last-child) > p:first-child",
             );
-            let mut price_duration_els = gig_review_el
-                .find_elements(price_duration_els_selector.as_ref())
-                .map_err(GigReviewsError::map_err_fn(price_duration_els_selector.to_owned()))?
+            let mut price_duration_els = mut_self.tab
+                .find_elements(&price_duration_els_selector)?
                 .into_iter();
             let price = price_duration_els
                 .next()
-                .ok_or(GigReviewsError::ElementNotFound("price".to_owned()))?
-                .get_inner_text()
-                .map_err(GigReviewsError::map_err_fn(price_duration_els_selector.nth_child(1)))?;
+                .ok_or(crate::Error::ElementNotFound(price_duration_els_selector.nth_child(1)))?
+                .get_inner_text()?;
             let duration = price_duration_els
                 .next()
-                .ok_or(GigReviewsError::ElementNotFound("duration".to_owned()))?
-                .get_inner_text()
-                .map_err(GigReviewsError::map_err_fn(price_duration_els_selector.nth_child(2)))?;
+                .ok_or(crate::Error::ElementNotFound(price_duration_els_selector.nth_child(2)))?
+                .get_inner_text()?;
             mut_self.current_index += 1;
             Ok(Some(GigReview {
                 country,
@@ -150,15 +109,15 @@ impl Iterator for GigReviewIterator {
 
 #[derive(Debug)]
 pub struct GigReview {
-    country: String,
-    rating: String,
-    price: String,
-    duration: String,
-    description: String,
+    pub country: String,
+    pub rating: String,
+    pub price: String,
+    pub duration: String,
+    pub description: String,
 }
 
 impl GigPage {
-    pub fn get_gig_reviews(&self) -> Result<impl IntoIterator<Item = Result<GigReview, GigReviewsError>>, GigReviewsError> {
+    pub fn get_gig_reviews(&self) -> Result<impl IntoIterator<Item = Result<GigReview, crate::Error>>, crate::Error> {
         GigReviewIterator::new(self.tab.clone())
     }
 }

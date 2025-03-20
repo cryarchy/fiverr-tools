@@ -42,7 +42,7 @@ impl<'a> CategoryGroupCategoriesIterator<'a> {
                 }))
             }
             Err(e) => {
-                println!("{e} : {selector}");
+                log::debug!("{e} : {selector}");
                 Ok(None)
             }
         }

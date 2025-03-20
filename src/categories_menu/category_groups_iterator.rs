@@ -31,7 +31,7 @@ impl<'a> CategoryGroupsIterator<'a> {
                 Ok(Some(CategoryGroupElement::new(self.tab, element)))
             }
             Err(e) => {
-                println!("{e} : {selector}");
+                log::debug!("{e} : {selector}");
                 Ok(None)
             }
         }

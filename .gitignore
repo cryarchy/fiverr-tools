@@ -3,3 +3,5 @@ chromedriver
 chromedriver_PATCHED
 LICENSE.chromedriver
 THIRD_PARTY_NOTICES.chromedriver
+app-config.yaml
+.env

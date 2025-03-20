@@ -40,7 +40,7 @@ impl<'a> MainCategoriesIterator<'a> {
                 Ok(Some(main_category_element))
             }
             Err(e) => {
-                println!("{e} : {selector}");
+                log::debug!("{e} : {selector}");
                 Ok(None)
             }
         }

@@ -14,6 +14,12 @@ impl<'a> WrappedElement<'a> {
         Self { element, selector }
     }
 
+    pub fn get_content(&self) -> Result<String, Error> {
+        self.element
+            .get_content()
+            .map_err(|e| Error::markup_interaction(e, self.selector()))
+    }
+
     pub fn get_inner_text(&self) -> Result<String, Error> {
         self.element
             .get_inner_text()
@@ -44,6 +50,13 @@ impl<'a> WrappedElement<'a> {
     pub fn move_mouse_over(&self) -> Result<&Self, Error> {
         self.element
             .move_mouse_over()
+            .map(|_| self)
+            .map_err(|e| Error::markup_interaction(e, self.selector()))
+    }
+
+    pub fn scroll_into_view(&self) -> Result<&Self, Error> {
+        self.element
+            .scroll_into_view()
             .map(|_| self)
             .map_err(|e| Error::markup_interaction(e, self.selector()))
     }
