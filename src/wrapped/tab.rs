@@ -35,7 +35,8 @@ impl WrappedTab {
             .find_elements(selector)
             .map(|els| {
                 els.into_iter()
-                    .map(|el| WrappedElement::new(el, selector.to_owned()))
+                    .enumerate()
+                    .map(|(i, el)| WrappedElement::new(el, selector.nth_child(i + 1)))
                     .collect::<Vec<_>>()
             })
             .map_err(|e| MarkupInteractionError::new(e, selector.to_string()).into())

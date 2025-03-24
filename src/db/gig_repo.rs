@@ -60,7 +60,7 @@ impl GigRepo {
     }
 
     pub async fn count_for_category(&self, category_id: i64) -> Result<i64, super::Error> {
-        let record = sqlx::query!(
+        let count_result = sqlx::query!(
             "
                 SELECT COUNT(*) as gig_count
                 FROM gig
@@ -70,10 +70,13 @@ impl GigRepo {
             category_id
         )
         .fetch_one(&self.pool)
-        .await
-        .map_err(super::Error::Sqlx)?;
+        .await;
 
-        match record.gig_count {
+        if let Err(sqlx::Error::RowNotFound) = count_result {
+            return Ok(0);
+        }
+
+        match count_result.map_err(super::Error::Sqlx)?.gig_count {
             Some(gig_count) => Ok(gig_count),
             None => Err(super::Error::Unexpected(
                 "expected gig_count to have a value".to_owned(),

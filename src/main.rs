@@ -173,7 +173,7 @@ async fn main() -> Result<()> {
             let fiverr_tab = get_fiverr_tab();
             fiverr_tab.navigate_to(category_url.as_str())?;
             fiverr_tab.wait_for_element_with_custom_timeout(
-                &GigsPage::gig_els_selector(),
+                &GigsPage::page_number_els_selector(),
                 Duration::from_secs(60),
             )?;
 
@@ -194,10 +194,6 @@ async fn main() -> Result<()> {
 
             // find the first gig within the category that does not have an associated record in the database
             let gigs_page = GigsPage::new(get_fiverr_tab());
-            struct GigToScrape {
-                url: Url,
-                page: usize,
-            }
             let mut gig_to_scrape = None;
             loop {
                 // go the the gigs page from which the last scraped gig was found
@@ -215,17 +211,14 @@ async fn main() -> Result<()> {
                         log::info!("{gig_path} - scraped");
                         continue;
                     }
-                    gig_to_scrape = Some(GigToScrape {
-                        url: gig_url,
-                        page: gig_card.page,
-                    });
+                    gig_to_scrape = Some(gig_url);
                     break;
                 }
 
                 last_gigs_page += 1;
             }
 
-            let Some(gig_to_scrape) = gig_to_scrape else {
+            let Some(gig_to_scrape_url) = gig_to_scrape else {
                 log::warn!(
                     "No more gigs to scrape in the {} category!",
                     category_record.name
@@ -235,7 +228,7 @@ async fn main() -> Result<()> {
 
             // navigate to the gig's page
             let fiverr_tab = get_fiverr_tab();
-            fiverr_tab.navigate_to(gig_to_scrape.url.as_str())?;
+            fiverr_tab.navigate_to(gig_to_scrape_url.as_str())?;
             fiverr_tab.wait_for_element_with_custom_timeout(
                 &GigPage::title_selector(),
                 Duration::from_secs(60),
@@ -243,7 +236,7 @@ async fn main() -> Result<()> {
 
             let gig_page = GigPage::new(get_fiverr_tab());
 
-            let Some(seller_username) = gig_to_scrape.url.path().split("/").nth(1) else {
+            let Some(seller_username) = gig_to_scrape_url.path().split("/").nth(1) else {
                 log::error!("Error getting seller's username from gig page's URL!");
                 break;
             };
@@ -285,7 +278,7 @@ async fn main() -> Result<()> {
                 }
             };
 
-            let gig_path = gig_to_scrape.url.path().to_owned();
+            let gig_path = gig_to_scrape_url.path().to_owned();
             let gig_title = gig_page.get_title()?;
             log::info!("Gig title: {gig_title}");
             let gig_rating = gig_page.get_gig_rating()?;
