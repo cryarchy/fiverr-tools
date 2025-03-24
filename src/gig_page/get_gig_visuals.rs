@@ -10,6 +10,22 @@ pub enum GalleryVisual {
     Image(String),
 }
 
+impl GalleryVisual {
+    pub fn r#type(&self) -> &'static str {
+        match self {
+            Self::Image(_) => "image",
+            Self::Video(_) => "video",
+        }
+    }
+
+    pub fn value(&self) -> &str {
+        match self {
+            Self::Image(v) => v,
+            Self::Video(v) => v,
+        }
+    }
+}
+
 impl GigPage {
     pub fn get_gig_visuals(&self) -> Result<Vec<GalleryVisual>, crate::Error> {
         let close_button_selector = Selector::new(".modal-package .modal-close".to_owned());

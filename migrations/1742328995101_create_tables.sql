@@ -1,7 +1,9 @@
 -- 1. Create the seller table.
 CREATE TABLE seller (
     id BIGSERIAL PRIMARY KEY,
+    username TEXT NOT NULL UNIQUE,
     rating TEXT NOT NULL,
+    level TEXT NOT NULL,
     reviews_count BIGINT NOT NULL,
     description TEXT NOT NULL
 );
@@ -24,8 +26,8 @@ CREATE TABLE visual_type_lookup (
     value TEXT NOT NULL UNIQUE
 );
 
--- 4. Create the gig_package_type table to support gig_package.type as a foreign key.
-CREATE TABLE gig_package_type (
+-- 4. Create the gig_package_type_lookup table to support gig_package.type as a foreign key.
+CREATE TABLE gig_package_type_lookup (
     id BIGSERIAL PRIMARY KEY,
     name TEXT NOT NULL UNIQUE
 );
@@ -34,7 +36,9 @@ CREATE TABLE gig_package_type (
 CREATE TABLE gig (
     id BIGSERIAL PRIMARY KEY,
     path TEXT NOT NULL UNIQUE,
+    title TEXT NOT NULL,
     rating TEXT NOT NULL,
+    reviews_count BIGINT NOT NULL,
     description TEXT NOT NULL,
     scrape_completed BOOLEAN NOT NULL DEFAULT FALSE,
     page BIGINT NOT NULL,
@@ -59,7 +63,7 @@ CREATE TABLE gig_visual (
     id BIGSERIAL PRIMARY KEY,
     gig_id BIGINT NOT NULL,
     url TEXT NOT NULL,
-    file_path TEXT NOT NULL,
+    file_path TEXT,
     visual_type BIGINT NOT NULL,
     FOREIGN KEY (gig_id) REFERENCES gig(id),
     FOREIGN KEY (visual_type) REFERENCES visual_type_lookup(id)
@@ -87,14 +91,14 @@ CREATE TABLE gig_faq (
 -- 10. Create the gig_package table.
 CREATE TABLE gig_package (
     id BIGSERIAL PRIMARY KEY,
-    type BIGINT NOT NULL,  -- references gig_package_type
+    type BIGINT NOT NULL,  -- references gig_package_type_lookup
     price DOUBLE PRECISION NOT NULL,
     title TEXT NOT NULL,
-    description TEXT NOT NULL,
+    description TEXT,
     gig_id BIGINT NOT NULL,
-    delivery_time TEXT NOT NULL,
+    delivery_time TEXT,
     FOREIGN KEY (gig_id) REFERENCES gig(id),
-    FOREIGN KEY (type) REFERENCES gig_package_type(id)
+    FOREIGN KEY (type) REFERENCES gig_package_type_lookup(id)
 );
 
 -- 11. Create the gig_package_feature table.

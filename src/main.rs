@@ -9,12 +9,13 @@ mod error;
 mod gig_page;
 mod gigs_page;
 mod markup_interaction_error;
+mod price_range_parser;
 mod selector;
 mod site_nav;
 mod string_cleaner;
 mod wrapped;
 
-use std::{sync::LazyLock, thread::sleep, time::Duration};
+use std::{sync::LazyLock, time::Duration};
 
 use anyhow::Result;
 use app_config::AppConfig;
@@ -22,7 +23,17 @@ use categories_menu::CategoriesMenu;
 use db::{
     gig_category_gigs::GigCategoryGigs,
     gig_category_repo::{GigCategoryRepo, ScrapeGigsOutput},
+    gig_faq_repo::GigFaqRepo,
+    gig_metadata_repo::GigMetadataRepo,
+    gig_package_feature_repo::GigPackageFeatureRepo,
+    gig_package_repo::GigPackageRepo,
+    gig_package_type_lookup::GigPackageTypeLookup,
     gig_repo::GigRepo,
+    gig_review_repo::GigReviewRepo,
+    seller_repo::SellerRepo,
+    seller_stat_repo::SellerStatRepo,
+    visual_repo::VisualRepo,
+    visual_type_lookup::VisualTypeLookup,
 };
 use error::Error;
 use figment::{
@@ -33,8 +44,10 @@ use flexi_logger::Logger;
 use gig_page::GigPage;
 use gigs_page::GigsPage;
 use headless_chrome::Browser;
+use price_range_parser::PRICE_RANGE_PARSER;
 use site_nav::SiteNav;
 use sqlx::postgres::PgPoolOptions;
+use string_cleaner::STRING_CLEANER;
 use url::Url;
 use wrapped::WrappedTab;
 
@@ -56,14 +69,25 @@ async fn main() -> Result<()> {
     let gig_category_repo = GigCategoryRepo::new(pool.clone());
     let gig_repo = GigRepo::new(pool.clone());
     let gig_category_gigs = GigCategoryGigs::new(pool.clone());
+    let seller_repo = SellerRepo::new(pool.clone());
+    let seller_stat_repo = SellerStatRepo::new(pool.clone());
+    let gig_metadata_repo = GigMetadataRepo::new(pool.clone());
+    let visual_type_lookup = VisualTypeLookup::new(pool.clone());
+    let visual_repo = VisualRepo::new(pool.clone());
+    let gig_package_type_lookup = GigPackageTypeLookup::new(pool.clone());
+    let gig_package_repo = GigPackageRepo::new(pool.clone());
+    let gig_package_feature_repo = GigPackageFeatureRepo::new(pool.clone());
+    let gig_faq_repo = GigFaqRepo::new(pool.clone());
+    let gig_review_repo = GigReviewRepo::new(pool.clone());
 
-    let browser = Browser::connect(app_config.browser_ws_url)?;
+    let browser =
+        Browser::connect_with_timeout(app_config.browser_ws_url, Duration::from_secs(600))?;
 
     let tab = browser.new_tab()?;
     tab.close(false)?;
 
     // Get the list of existing tabs/pages
-    let fiverr_tab = {
+    let get_fiverr_tab = || {
         let tabs = browser.get_tabs().lock().unwrap();
 
         let mut fiverr_tab = None;
@@ -78,13 +102,14 @@ async fn main() -> Result<()> {
         WrappedTab::new((*fiverr_tab.unwrap()).clone())
     };
 
+    let fiverr_tab = get_fiverr_tab();
     log::info!("Fiverr tab title: {}", fiverr_tab.get_title()?);
 
     loop {
-        let page_nav = SiteNav::new(fiverr_tab.clone());
+        let page_nav = SiteNav::new(get_fiverr_tab());
         page_nav.go_home()?;
 
-        let categories_menu = CategoriesMenu::new(fiverr_tab.clone());
+        let categories_menu = CategoriesMenu::new(get_fiverr_tab());
         // get a gig category
         for category in categories_menu.get_gig_categories()? {
             let category = category?;
@@ -145,6 +170,7 @@ async fn main() -> Result<()> {
             }
 
             // navigate to the current category's gigs page
+            let fiverr_tab = get_fiverr_tab();
             fiverr_tab.navigate_to(category_url.as_str())?;
             fiverr_tab.wait_for_element_with_custom_timeout(
                 &GigsPage::gig_els_selector(),
@@ -167,7 +193,7 @@ async fn main() -> Result<()> {
             };
 
             // find the first gig within the category that does not have an associated record in the database
-            let gigs_page = GigsPage::new(fiverr_tab.clone());
+            let gigs_page = GigsPage::new(get_fiverr_tab());
             struct GigToScrape {
                 url: Url,
                 page: usize,
@@ -208,54 +234,177 @@ async fn main() -> Result<()> {
             };
 
             // navigate to the gig's page
+            let fiverr_tab = get_fiverr_tab();
             fiverr_tab.navigate_to(gig_to_scrape.url.as_str())?;
             fiverr_tab.wait_for_element_with_custom_timeout(
                 &GigPage::title_selector(),
                 Duration::from_secs(60),
             )?;
 
-            let gig_page = GigPage::new(fiverr_tab.clone());
+            let gig_page = GigPage::new(get_fiverr_tab());
 
-            log::info!("Gig title: {}", gig_page.get_title()?);
-            log::info!("Rating: {}", gig_page.get_gig_rating()?);
-            log::info!("Reviews count: {}", gig_page.get_gig_reviews_count()?);
-            log::info!("Description: {}", gig_page.get_gig_description()?);
+            let Some(seller_username) = gig_to_scrape.url.path().split("/").nth(1) else {
+                log::error!("Error getting seller's username from gig page's URL!");
+                break;
+            };
+
+            let seller_id = match seller_repo.get_id(seller_username).await? {
+                Some(seller_id) => seller_id,
+                None => {
+                    // scrape seller information if the seller's information does not exist in the database
+                    let seller_rating = gig_page.get_seller_rating()?;
+                    log::info!("Seller rating: {seller_rating}");
+                    let seller_level = gig_page.get_seller_level()?;
+                    log::info!("Seller level: {seller_level}");
+                    let seller_review_count = gig_page.get_seller_ratings_count()?;
+                    log::info!("Seller reviews count: {seller_review_count}");
+                    let seller_description = gig_page.get_seller_description()?;
+                    log::info!("Seller description: {seller_description}");
+                    let create_params = db::seller_repo::CreateParams {
+                        username: seller_username.to_owned(),
+                        rating: seller_rating,
+                        level: seller_level,
+                        reviews_count: seller_review_count as i64,
+                        description: seller_description,
+                    };
+                    let seller_id = seller_repo.create(&create_params).await?;
+
+                    log::info!("Seller stats:");
+                    let seller_stats = gig_page.get_seller_stats()?;
+                    for stat in seller_stats {
+                        log::info!("\t {}: {}", stat.name, stat.value);
+                        let create_params = db::seller_stat_repo::CreateParams {
+                            seller_id,
+                            key: stat.name,
+                            value: stat.value,
+                        };
+                        seller_stat_repo.create(&create_params).await?;
+                    }
+
+                    seller_id
+                }
+            };
+
+            let gig_path = gig_to_scrape.url.path().to_owned();
+            let gig_title = gig_page.get_title()?;
+            log::info!("Gig title: {gig_title}");
+            let gig_rating = gig_page.get_gig_rating()?;
+            log::info!("Rating: {gig_rating}");
+            let gig_reviews_count = gig_page.get_gig_reviews_count()?;
+            log::info!("Reviews count: {gig_reviews_count}");
+            let gig_description = gig_page.get_gig_description()?;
+            log::info!("Description: {gig_description}");
+
+            let create_params = db::gig_repo::CreateParams {
+                path: gig_path,
+                title: gig_title,
+                rating: gig_rating,
+                reviews_count: gig_reviews_count as i64,
+                description: gig_description,
+                page: last_gigs_page,
+                seller_id,
+                category_id: category_record.id,
+            };
+            let gig_id = gig_repo.create(&create_params).await?;
+
             log::info!("Metadata:");
             let gig_metadata = gig_page.get_gig_metadata()?;
-            for entry in gig_metadata {
-                log::info!("\t {:?}", entry);
+            for metadata in gig_metadata {
+                log::info!("\t {}: {}", metadata.name, metadata.values.join(", "));
+                let create_params = db::gig_metadata_repo::CreateParams {
+                    gig_id,
+                    key: metadata.name,
+                    values: metadata.values,
+                };
+                gig_metadata_repo.create(&create_params).await?;
             }
-            log::info!("Seller rating: {}", gig_page.get_seller_rating()?);
-            log::info!(
-                "Seller ratings count: {}",
-                gig_page.get_seller_ratings_count()?
-            );
-            log::info!("Seller level: {}", gig_page.get_seller_level()?);
-            log::info!("Seller stats:");
-            let seller_stats = gig_page.get_seller_stats()?;
-            for entry in seller_stats {
-                log::info!("\t {:?}", entry);
-            }
-            log::info!("Seller description: {}", gig_page.get_seller_description()?);
+
             let gallery_visuals = gig_page.get_gig_visuals()?;
             log::info!("Gallery visuals:");
-            for entry in gallery_visuals {
-                log::info!("\t {:?}", entry);
+            for visual in gallery_visuals {
+                log::info!("\t {:?}: {}", visual.r#type(), visual.value());
+                let visual_type_id = match visual_type_lookup.get_type_id(visual.r#type()).await? {
+                    Some(visual_type_id) => visual_type_id,
+                    None => visual_type_lookup.create(visual.r#type()).await?,
+                };
+                let create_params = db::visual_repo::CreateParams {
+                    gig_id,
+                    url: visual.value().to_owned(),
+                    visual_type: visual_type_id,
+                };
+                visual_repo.create(&create_params).await?;
             }
+
             log::info!("Gig packages:");
             let gig_packages = gig_page.get_gig_packages()?;
-            log::info!("{:#?}", gig_packages);
+            for package in gig_packages {
+                log::info!(
+                    "\t {} - {} @ {}",
+                    package.r#type,
+                    package.title,
+                    package.price
+                );
+                let gig_package_type =
+                    match gig_package_type_lookup.get_type_id(&package.r#type).await? {
+                        Some(gig_package_type) => gig_package_type,
+                        None => visual_type_lookup.create(&package.r#type).await?,
+                    };
+                let create_params = db::gig_package_repo::CreateParams {
+                    r#type: gig_package_type,
+                    price: package.price as f64,
+                    title: package.title,
+                    description: package.description,
+                    gig_id,
+                    delivery_time: package.delivery_time,
+                };
+                let package_id = gig_package_repo.create(&create_params).await?;
+                let package_properties = package.properties;
+                for (key, value) in package_properties.into_iter() {
+                    log::info!("\t\t {}: {}", key, value);
+                    let create_params = db::gig_package_feature_repo::CreateParams {
+                        package_id,
+                        key,
+                        value,
+                    };
+                    gig_package_feature_repo.create(&create_params).await?;
+                }
+            }
+
             log::info!("Gig FAQs:");
             for result in gig_page.get_gig_faqs()? {
-                log::info!("{:#?}", result?);
+                let gig_faq = result?;
+                log::info!("Question: {}\nAnswer: {}", gig_faq.question, gig_faq.answer);
+                let create_params = db::gig_faq_repo::CreateParams {
+                    gig_id,
+                    question: gig_faq.question,
+                    answer: gig_faq.answer,
+                };
+                gig_faq_repo.create(&create_params).await?;
             }
+
             log::info!("Gig reviews:");
             for gig_review_result in gig_page.get_gig_reviews()? {
-                log::info!("{:#?}", gig_review_result?);
-                break;
+                let gig_review = gig_review_result?;
+                log::info!("{:#?}", gig_review);
+                let rating = gig_review.rating.parse::<f64>()?;
+                let (price_range_min, price_range_max) =
+                    PRICE_RANGE_PARSER.get_range_tuple(&gig_review.price)?;
+                let duration_string = STRING_CLEANER.as_simple_text(&gig_review.duration)?;
+                let mut duration_parts = duration_string.split(" ");
+                let duration_value = STRING_CLEANER.as_usize(duration_parts.next().unwrap())?;
+                let duration_unit = duration_parts.next().unwrap().to_owned();
+                let create_params = db::gig_review_repo::CreateParams {
+                    gig_id,
+                    country: gig_review.country,
+                    rating,
+                    price_range_min: price_range_min as i64,
+                    price_range_max: price_range_max as i64,
+                    duration_value: duration_value as i64,
+                    duration_unit,
+                    description: gig_review.description,
+                };
+                gig_review_repo.create(&create_params).await?;
             }
         }
     }
-
-    Ok(())
 }

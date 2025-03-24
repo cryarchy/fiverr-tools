@@ -32,7 +32,7 @@ impl<'a> CategoryGroupCategoriesIterator<'a> {
         let selector = self.get_category_el_selector();
         match self.tab.find_element(&selector) {
             Ok(element) => {
-                let category_name = element.get_inner_text()?;
+                let category_name = element.get_inner_text()?.replace("NEW", "");
                 let href = element.get_expected_attribute_value("href")?;
 
                 self.current_index += 1;
