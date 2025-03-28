@@ -2,7 +2,7 @@ use sqlx::PgPool;
 
 pub struct CreateParams {
     pub gig_id: i64,
-    pub country: String,
+    pub country: Option<String>,
     pub rating: f64,
     pub price_range_min: i64,
     pub price_range_max: i64,

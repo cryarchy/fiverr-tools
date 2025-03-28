@@ -30,16 +30,23 @@ impl PriceRangeParser {
 
     pub fn get_range_tuple(&self, no: &str) -> Result<(usize, usize), PriceRangeParserError> {
         let price_range = self.price_range_re.replace_all(no, "");
-        let mut range_vals = price_range.split('-');
-        let min_val = range_vals.next().ok_or(PriceRangeParserError::MinVal)?;
-        let max_val = range_vals.next().ok_or(PriceRangeParserError::MaxVal)?;
-        let min_val = min_val
-            .parse()
-            .map_err(|_| PriceRangeParserError::ParseInt(no.to_owned()))?;
-        let max_val = max_val
-            .parse()
-            .map_err(|_| PriceRangeParserError::ParseInt(no.to_owned()))?;
+        if !price_range.contains('-') {
+            let max_val = price_range
+                .parse()
+                .map_err(|_| PriceRangeParserError::ParseInt(no.to_owned()))?;
+            Ok((0, max_val))
+        } else {
+            let mut range_vals = price_range.split('-');
+            let min_val = range_vals.next().ok_or(PriceRangeParserError::MinVal)?;
+            let max_val = range_vals.next().ok_or(PriceRangeParserError::MaxVal)?;
+            let min_val = min_val
+                .parse()
+                .map_err(|_| PriceRangeParserError::ParseInt(no.to_owned()))?;
+            let max_val = max_val
+                .parse()
+                .map_err(|_| PriceRangeParserError::ParseInt(no.to_owned()))?;
 
-        Ok((min_val, max_val))
+            Ok((min_val, max_val))
+        }
     }
 }

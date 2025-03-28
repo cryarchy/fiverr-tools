@@ -1,7 +1,3 @@
-// Start Google Chrome with:
-//     $ google-chrome --remote-debugging-port=9222 --user-data-dir="/tmp/chrome_dev"
-// and update the websocket URL below
-
 mod app_config;
 mod categories_menu;
 mod db;
@@ -195,7 +191,7 @@ async fn main() -> Result<()> {
             // find the first gig within the category that does not have an associated record in the database
             let gigs_page = GigsPage::new(get_fiverr_tab());
             let mut gig_to_scrape = None;
-            loop {
+            'outer: loop {
                 // go the the gigs page from which the last scraped gig was found
                 log::info!("Navigating to page {last_gigs_page}");
                 if !gigs_page.go_to_page(last_gigs_page as usize)? {
@@ -212,7 +208,7 @@ async fn main() -> Result<()> {
                         continue;
                     }
                     gig_to_scrape = Some(gig_url);
-                    break;
+                    break 'outer;
                 }
 
                 last_gigs_page += 1;
@@ -229,6 +225,10 @@ async fn main() -> Result<()> {
             // navigate to the gig's page
             let fiverr_tab = get_fiverr_tab();
             fiverr_tab.navigate_to(gig_to_scrape_url.as_str())?;
+            fiverr_tab.wait_for_element_with_custom_timeout(
+                &GigPage::seller_stats_selector(),
+                Duration::from_secs(60),
+            )?;
             fiverr_tab.wait_for_element_with_custom_timeout(
                 &GigPage::title_selector(),
                 Duration::from_secs(60),
@@ -327,6 +327,7 @@ async fn main() -> Result<()> {
                 };
                 visual_repo.create(&create_params).await?;
             }
+            gig_page.close_visuals_modal()?;
 
             log::info!("Gig packages:");
             let gig_packages = gig_page.get_gig_packages()?;
@@ -340,7 +341,7 @@ async fn main() -> Result<()> {
                 let gig_package_type =
                     match gig_package_type_lookup.get_type_id(&package.r#type).await? {
                         Some(gig_package_type) => gig_package_type,
-                        None => visual_type_lookup.create(&package.r#type).await?,
+                        None => gig_package_type_lookup.create(&package.r#type).await?,
                     };
                 let create_params = db::gig_package_repo::CreateParams {
                     r#type: gig_package_type,
@@ -376,7 +377,10 @@ async fn main() -> Result<()> {
             }
 
             log::info!("Gig reviews:");
-            for gig_review_result in gig_page.get_gig_reviews()? {
+            for (i, gig_review_result) in gig_page.get_gig_reviews()?.into_iter().enumerate() {
+                if i == 80 {
+                    gig_repo.set_scrape_completed(gig_id).await?;
+                }
                 let gig_review = gig_review_result?;
                 log::info!("{:#?}", gig_review);
                 let rating = gig_review.rating.parse::<f64>()?;

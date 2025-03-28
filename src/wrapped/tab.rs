@@ -30,13 +30,20 @@ impl WrappedTab {
     pub fn find_elements<'a>(
         &'a self,
         selector: &Selector,
+        auto_index: bool,
     ) -> Result<Vec<WrappedElement<'a>>, Error> {
         self.tab
             .find_elements(selector)
             .map(|els| {
                 els.into_iter()
                     .enumerate()
-                    .map(|(i, el)| WrappedElement::new(el, selector.nth_child(i + 1)))
+                    .map(|(i, el)| {
+                        let selector = match auto_index {
+                            true => selector.nth_child(i + 1),
+                            false => selector.to_owned(),
+                        };
+                        WrappedElement::new(el, selector)
+                    })
                     .collect::<Vec<_>>()
             })
             .map_err(|e| MarkupInteractionError::new(e, selector.to_string()).into())
@@ -74,6 +81,7 @@ impl WrappedTab {
         self.tab
             .navigate_to(url)
             .map(|_| ())
-            .map_err(|e| Error::NavigatedTo(url.to_owned(), e))
+            .map_err(|e| Error::NavigatedTo(url.to_owned(), e))?;
+        self.wait_until_navigated()
     }
 }

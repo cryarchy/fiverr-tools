@@ -4,10 +4,7 @@ use std::time::Duration;
 
 use gig_cards_iterator::GigCardsIterator;
 
-use crate::{
-    markup_interaction_error::MarkupInteractionError, selector::Selector,
-    string_cleaner::STRING_CLEANER, wrapped::WrappedTab,
-};
+use crate::{selector::Selector, string_cleaner::STRING_CLEANER, wrapped::WrappedTab};
 
 pub struct GigsPage {
     tab: WrappedTab,
@@ -23,11 +20,7 @@ impl GigsPage {
     }
 
     pub fn gigs(&self) -> Result<GigCardsIterator<'_>, crate::Error> {
-        Ok(GigCardsIterator::new(
-            &self.tab,
-            self.get_current_page()?,
-            self.minimum_rating,
-        ))
+        Ok(GigCardsIterator::new(&self.tab, self.minimum_rating))
     }
 
     fn current_page_selector() -> Selector {
@@ -68,7 +61,7 @@ impl GigsPage {
                 break Ok(true);
             }
 
-            let page_number_els = self.tab.find_elements(&page_number_els_selector)?;
+            let page_number_els = self.tab.find_elements(&page_number_els_selector, true)?;
             let first_pagination_el = page_number_els.first().ok_or(crate::Error::Unexpected(
                 "Empty pagination component".to_string(),
             ))?;

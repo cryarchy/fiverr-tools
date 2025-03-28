@@ -27,11 +27,16 @@ impl GalleryVisual {
 }
 
 impl GigPage {
-    pub fn get_gig_visuals(&self) -> Result<Vec<GalleryVisual>, crate::Error> {
+    pub fn close_visuals_modal(&self) -> Result<(), crate::Error> {
         let close_button_selector = Selector::new(".modal-package .modal-close".to_owned());
         if let Ok(close_button_el) = self.tab.find_element(&close_button_selector) {
             close_button_el.click()?;
         }
+        Ok(())
+    }
+
+    pub fn get_gig_visuals(&self) -> Result<Vec<GalleryVisual>, crate::Error> {
+        self.close_visuals_modal()?;
 
         let gallery_thumbnail_els_selector = Selector::new(
             "#main-wrapper > .main-content .gig-page > .main .gallery-thumbnails a.thumbnail"
@@ -39,7 +44,7 @@ impl GigPage {
         );
         let gallery_thumbnail_els_count = self
             .tab
-            .find_elements(&gallery_thumbnail_els_selector)?
+            .find_elements(&gallery_thumbnail_els_selector, true)?
             .len();
 
         let mut gallery_visuals = Vec::new();
@@ -115,7 +120,8 @@ impl GigPage {
                 let modal_slides_selector = Selector::new(
                     ".modal-package .slideshow-component .slideshow-slide".to_owned(),
                 );
-                let modal_slides_count = self.tab.find_elements(&modal_slides_selector)?.len();
+                let modal_slides_count =
+                    self.tab.find_elements(&modal_slides_selector, true)?.len();
                 // go to the first slide
                 let first_slide_selector = Selector::new(
                     ".modal-package .slideshow-component .slideshow-slide:nth-child(1).current"

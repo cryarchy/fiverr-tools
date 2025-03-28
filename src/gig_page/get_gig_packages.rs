@@ -17,7 +17,9 @@ pub struct GigPackage {
 impl GigPage {
     pub fn get_gig_packages(&self) -> Result<Vec<GigPackage>, crate::Error> {
         let gig_package_header_els_selector = Selector::new("#main-wrapper > .main-content .gig-page > .main .gig-page-packages-table table tbody tr.package-type th".to_owned());
-        let gig_packages_header_els = self.tab.find_elements(&gig_package_header_els_selector)?;
+        let gig_packages_header_els = self
+            .tab
+            .find_elements(&gig_package_header_els_selector, true)?;
         let mut gig_packages = Vec::new();
         for gig_package_header_el in gig_packages_header_els.iter().skip(1) {
             let price_el_selector = gig_package_header_el.selector().append(".price-wrapper");
@@ -47,14 +49,16 @@ impl GigPage {
         }
 
         let gig_package_desc_els_selector = Selector::new("#main-wrapper > .main-content .gig-page > .main .gig-page-packages-table table tbody tr.description td".to_owned());
-        let gig_packages_desc_els = self.tab.find_elements(&gig_package_desc_els_selector)?;
+        let gig_packages_desc_els = self
+            .tab
+            .find_elements(&gig_package_desc_els_selector, true)?;
         for (i, gig_packages_desc_el) in gig_packages_desc_els.iter().skip(1).enumerate() {
             let description = gig_packages_desc_el.get_inner_text()?;
             gig_packages[i].description = Some(description);
         }
 
         let check_svg_els_selector = Selector::new("#main-wrapper > .main-content .gig-page > .main .gig-page-packages-table table tbody tr td span:has(svg)".to_owned());
-        let check_svg_els = self.tab.find_elements(&check_svg_els_selector)?;
+        let check_svg_els = self.tab.find_elements(&check_svg_els_selector, false)?;
         let count_classes = |class: &str| class.split(' ').collect::<Vec<_>>().len();
         let mut checked_mark_class_count = 0;
         for svg_span_el in check_svg_els.into_iter() {
@@ -67,11 +71,14 @@ impl GigPage {
         }
 
         log::debug!("SVG span class count for checked: {checked_mark_class_count}");
-        let table_rows_selector = Selector::new("#main-wrapper > .main-content .gig-page > .main .gig-page-packages-table table tbody tr:not([class])".to_owned());
-        let table_rows = self.tab.find_elements(&table_rows_selector)?;
+        let table_rows_selector = Selector::new("#main-wrapper > .main-content .gig-page > .main .gig-page-packages-table table tbody tr".to_owned());
+        let table_rows = self.tab.find_elements(&table_rows_selector, true)?;
         for table_row in table_rows.into_iter() {
+            if table_row.get_attribute_value("class")?.is_some() {
+                continue;
+            }
             let table_data_selector = table_row.selector().append("td");
-            let row_data_els = self.tab.find_elements(&table_data_selector)?;
+            let row_data_els = self.tab.find_elements(&table_data_selector, true)?;
             let row_property = row_data_els[0].get_inner_text()?;
             for (i, data_el) in row_data_els.iter().skip(1).enumerate() {
                 let span_selector = data_el.selector().append("span:has(svg)");
@@ -102,17 +109,17 @@ impl GigPage {
         let gig_package_delivery_time_els_selector = Selector::new("#main-wrapper > .main-content .gig-page > .main .gig-page-packages-table table tbody tr.delivery-time td".to_owned());
         let gig_package_delivery_time_els = self
             .tab
-            .find_elements(&gig_package_delivery_time_els_selector)?;
+            .find_elements(&gig_package_delivery_time_els_selector, true)?;
         for (i, gig_package_delivery_time_el) in
             gig_package_delivery_time_els.iter().skip(1).enumerate()
         {
             let delivery_time_el_selector = gig_package_delivery_time_el
                 .selector()
                 .append("span:not([class])");
-            let delivery_time = self
-                .tab
-                .find_element(&delivery_time_el_selector)?
-                .get_inner_text()?;
+            let delivery_time = match self.tab.find_element(&delivery_time_el_selector) {
+                Ok(element) => element.get_inner_text()?,
+                Err(_) => gig_package_delivery_time_el.get_inner_text()?,
+            };
             gig_packages[i].delivery_time = Some(delivery_time);
         }
 

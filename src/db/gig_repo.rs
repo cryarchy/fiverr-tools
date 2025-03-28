@@ -20,6 +20,22 @@ impl GigRepo {
         Self { pool }
     }
 
+    pub async fn set_scrape_completed(&self, id: i64) -> Result<bool, super::Error> {
+        let update_result = sqlx::query!(
+            "
+                UPDATE gig
+                SET scrape_completed = true
+                WHERE id = $1
+            ",
+            id
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(super::Error::Sqlx)?;
+
+        Ok(update_result.rows_affected() == 1)
+    }
+
     pub async fn create(&self, params: &CreateParams) -> Result<i64, super::Error> {
         let insert_result = sqlx::query!(
             "
@@ -85,16 +101,92 @@ impl GigRepo {
     }
 
     pub async fn delete_partially_scraped_gigs(&self) -> Result<u64, super::Error> {
-        sqlx::query!(
+        let fetch_result = sqlx::query!(
             "
-                DELETE FROM gig
+                SELECT id
+                FROM gig
                 WHERE scrape_completed = false;
             "
         )
+        .fetch_all(&self.pool)
+        .await;
+
+        if let Err(sqlx::Error::RowNotFound) = fetch_result {
+            return Ok(0);
+        }
+
+        let partial_gigs_ids = fetch_result?.into_iter().map(|r| r.id).collect::<Vec<_>>();
+
+        let fetch_result = sqlx::query!(
+            "SELECT id FROM gig_package WHERE gig_id IN (SELECT unnest($1::integer[]))",
+            &partial_gigs_ids as &Vec<i64>
+        )
+        .fetch_all(&self.pool)
+        .await;
+
+        let gig_packages_ids = match fetch_result {
+            Ok(records) => records.into_iter().map(|r| r.id).collect::<Vec<_>>(),
+            Err(sqlx::Error::RowNotFound) => Vec::new(),
+            Err(e) => return Err(e.into()),
+        };
+
+        // gig_package_feature
+        sqlx::query!(
+            "DELETE FROM gig_package_feature WHERE gig_package_id IN (SELECT unnest($1::integer[]))",
+            &gig_packages_ids as &Vec<i64>
+        )
         .execute(&self.pool)
-        .await
-        .map(|result| result.rows_affected())
-        .map_err(super::Error::Sqlx)
+        .await?;
+
+        // gig_package
+        sqlx::query!(
+            "DELETE FROM gig_package WHERE id IN (SELECT unnest($1::integer[]))",
+            gig_packages_ids as Vec<i64>
+        )
+        .execute(&self.pool)
+        .await?;
+
+        // gig_metadata
+        sqlx::query!(
+            "DELETE FROM gig_metadata WHERE gig_id IN (SELECT unnest($1::integer[]))",
+            &partial_gigs_ids as &Vec<i64>
+        )
+        .execute(&self.pool)
+        .await?;
+
+        // gig_visual
+        sqlx::query!(
+            "DELETE FROM gig_visual WHERE gig_id IN (SELECT unnest($1::integer[]))",
+            &partial_gigs_ids as &Vec<i64>
+        )
+        .execute(&self.pool)
+        .await?;
+
+        // gig_faq
+        sqlx::query!(
+            "DELETE FROM gig_faq WHERE gig_id IN (SELECT unnest($1::integer[]))",
+            &partial_gigs_ids as &Vec<i64>
+        )
+        .execute(&self.pool)
+        .await?;
+
+        // gig_review
+        sqlx::query!(
+            "DELETE FROM gig_review WHERE gig_id IN (SELECT unnest($1::integer[]))",
+            &partial_gigs_ids as &Vec<i64>
+        )
+        .execute(&self.pool)
+        .await?;
+
+        // gig
+        sqlx::query!(
+            "DELETE FROM gig WHERE id IN (SELECT unnest($1::integer[]))",
+            &partial_gigs_ids as &Vec<i64>
+        )
+        .execute(&self.pool)
+        .await?;
+
+        Ok(partial_gigs_ids.len() as u64)
     }
 
     pub async fn get_page_of_last_scraped_gig(

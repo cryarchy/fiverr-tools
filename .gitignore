@@ -5,3 +5,5 @@ LICENSE.chromedriver
 THIRD_PARTY_NOTICES.chromedriver
 app-config.yaml
 .env
+/checker
+checker.tar.gz

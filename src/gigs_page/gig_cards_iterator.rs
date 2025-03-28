@@ -6,22 +6,19 @@ use crate::{
 #[derive(Debug)]
 pub struct GigCard {
     pub url: String,
-    pub page: usize,
 }
 
 pub struct GigCardsIterator<'a> {
     tab: &'a WrappedTab,
     current_index: usize,
-    page: usize,
     minimum_rating: usize,
 }
 
 impl<'a> GigCardsIterator<'a> {
-    pub(super) fn new(tab: &'a WrappedTab, page: usize, minimum_rating: usize) -> Self {
+    pub(super) fn new(tab: &'a WrappedTab, minimum_rating: usize) -> Self {
         Self {
             tab,
             current_index: 1,
-            page,
             minimum_rating,
         }
     }
@@ -56,18 +53,12 @@ impl<'a> GigCardsIterator<'a> {
 
             if ratings_count.contains("k") {
                 self.current_index += 1;
-                return Ok(Some(GigCard {
-                    url,
-                    page: self.page,
-                }));
+                return Ok(Some(GigCard { url }));
             } else {
                 let ratings_count = STRING_CLEANER.as_usize(&ratings_count)?;
                 self.current_index += 1;
                 if ratings_count > self.minimum_rating {
-                    return Ok(Some(GigCard {
-                        url,
-                        page: self.page,
-                    }));
+                    return Ok(Some(GigCard { url }));
                 }
             }
         }

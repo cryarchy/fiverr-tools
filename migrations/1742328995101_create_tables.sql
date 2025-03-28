@@ -115,7 +115,7 @@ CREATE TABLE gig_package_feature (
 CREATE TABLE gig_review (
     id BIGSERIAL PRIMARY KEY,
     gig_id BIGINT NOT NULL,
-    country TEXT NOT NULL,
+    country TEXT,
     rating DOUBLE PRECISION NOT NULL,
     price_range_min BIGINT NOT NULL,
     price_range_max BIGINT NOT NULL,

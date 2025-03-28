@@ -33,6 +33,12 @@ impl Iterator for GigReviewIterator {
                 .find_element(&gig_review_el_selector);
             let Ok(gig_review_el) = gig_review_el else {
                 for _ in 0..3 {
+                    let bottom_selector = Selector::new("#main-wrapper > .main-content .gig-page-bottom".to_owned());
+                    if let Ok(element) = mut_self.tab.find_element(&bottom_selector) {
+                        if let Err(e) = element.scroll_into_view() {
+                            log::error!("Error: {e} - {}", &bottom_selector);
+                        }
+                    }
                 let show_more_button_selector = Selector::new("#main-wrapper > .main-content .gig-page > .main .gig-page-reviews .reviews-wrap > div > button".to_owned());
                 match mut_self.tab.find_element(&show_more_button_selector) {
                     Ok(show_more_button) => {
@@ -57,8 +63,11 @@ impl Iterator for GigReviewIterator {
             gig_review_el.scroll_into_view()?;
             let country_selector = gig_review_el.selector().append(".country p");
             let country = mut_self.tab
-                .find_element(&country_selector)?
-                .get_inner_text()?;
+                .find_element(&country_selector).ok();
+            let country = match country {
+                Some(country) => Some(country.get_inner_text()?),
+                None => None
+            };
 
             let rating_selector = gig_review_el.selector().append("strong.rating-score");
             let rating = mut_self.tab
@@ -81,7 +90,7 @@ impl Iterator for GigReviewIterator {
                 "div:has(p:nth-child(1)):has(p:nth-child(2):last-child) > p:first-child",
             );
             let mut price_duration_els = mut_self.tab
-                .find_elements(&price_duration_els_selector)?
+                .find_elements(&price_duration_els_selector, false)?
                 .into_iter();
             let price = price_duration_els
                 .next()
@@ -109,7 +118,7 @@ impl Iterator for GigReviewIterator {
 
 #[derive(Debug)]
 pub struct GigReview {
-    pub country: String,
+    pub country: Option<String>,
     pub rating: String,
     pub price: String,
     pub duration: String,

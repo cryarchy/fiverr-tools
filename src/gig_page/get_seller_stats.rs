@@ -9,12 +9,16 @@ pub struct SellerStat {
 }
 
 impl GigPage {
-    pub fn get_seller_stats(&self) -> Result<Vec<SellerStat>, crate::Error> {
-        let seller_stats_selector = Selector::new(
+    pub fn seller_stats_selector() -> Selector {
+        Selector::new(
             "#main-wrapper > .main-content .gig-page > .main .seller-card .user-stats > li"
                 .to_owned(),
-        );
-        let seller_stat_els = self.tab.find_elements(&seller_stats_selector)?;
+        )
+    }
+
+    pub fn get_seller_stats(&self) -> Result<Vec<SellerStat>, crate::Error> {
+        let seller_stats_selector = Self::seller_stats_selector();
+        let seller_stat_els = self.tab.find_elements(&seller_stats_selector, true)?;
         let mut seller_stats = Vec::new();
 
         for seller_stat_el in seller_stat_els.into_iter() {

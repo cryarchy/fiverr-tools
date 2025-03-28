@@ -66,6 +66,10 @@ impl<'a> CategoriesIterator<'a> {
             None => match self.category_groups_iterator.next() {
                 Some(category_group) => {
                     self.current_category_group = category_group?;
+                    log::debug!(
+                        "Found category group: {}",
+                        self.current_category_group.selector()
+                    );
                     self.category_group_categories_iterator = CategoryGroupCategoriesIterator::new(
                         self.tab,
                         self.current_category_group.selector().to_owned(),

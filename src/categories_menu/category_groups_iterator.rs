@@ -25,6 +25,7 @@ impl<'a> CategoryGroupsIterator<'a> {
 
     fn _next(&mut self) -> Result<Option<CategoryGroupElement<'a>>, crate::Error> {
         let selector = self.selector();
+        log::debug!("Category Group Selector: '{selector}'");
         match self.tab.find_element(&selector) {
             Ok(element) => {
                 self.current_index += 1;
