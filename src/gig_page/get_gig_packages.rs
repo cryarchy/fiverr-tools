@@ -17,9 +17,13 @@ pub struct GigPackage {
 impl GigPage {
     pub fn get_gig_packages(&self) -> Result<Vec<GigPackage>, crate::Error> {
         let gig_package_header_els_selector = Selector::new("#main-wrapper > .main-content .gig-page > .main .gig-page-packages-table table tbody tr.package-type th".to_owned());
-        let gig_packages_header_els = self
+        let Ok(gig_packages_header_els) = self
             .tab
-            .find_elements(&gig_package_header_els_selector, true)?;
+            .find_elements(&gig_package_header_els_selector, true)
+        else {
+            log::warn!("Gig with no packages table found!");
+            return Ok(Vec::with_capacity(0));
+        };
         let mut gig_packages = Vec::new();
         for gig_package_header_el in gig_packages_header_els.iter().skip(1) {
             let price_el_selector = gig_package_header_el.selector().append(".price-wrapper");
