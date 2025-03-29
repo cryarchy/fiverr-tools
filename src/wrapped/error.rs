@@ -12,6 +12,8 @@ pub enum Error {
     WaitUntilNavigated(anyhow::Error),
     #[error("Error navigating to '{0}': {1}")]
     NavigatedTo(String, anyhow::Error),
+    #[error("Expression evaluation error: {0}")]
+    Evaluate(anyhow::Error),
 }
 
 impl Error {

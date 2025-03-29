@@ -84,4 +84,11 @@ impl WrappedTab {
             .map_err(|e| Error::NavigatedTo(url.to_owned(), e))?;
         self.wait_until_navigated()
     }
+
+    pub fn ping(&self) -> Result<(), Error> {
+        self.tab
+            .evaluate("void 0", false)
+            .map(|_| ())
+            .map_err(Error::Evaluate)
+    }
 }

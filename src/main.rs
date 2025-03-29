@@ -79,29 +79,6 @@ async fn main() -> Result<()> {
     let browser =
         Browser::connect_with_timeout(app_config.browser_ws_url, Duration::from_secs(600))?;
 
-    let browser_clone = browser.clone();
-
-    tokio::spawn(async move {
-        let mut interval = tokio::time::interval(Duration::from_secs(30));
-
-        loop {
-            interval.tick().await;
-
-            let tabs = browser_clone.get_tabs().lock().unwrap();
-
-            let mut fiverr_tab = None;
-
-            for tab in tabs.iter() {
-                if tab.get_url().contains("fiverr") {
-                    fiverr_tab = Some(tab);
-                    break;
-                }
-            }
-
-            (*fiverr_tab.unwrap()).evaluate("void 0", false).unwrap();
-        }
-    });
-
     let tab = browser.new_tab()?;
     tab.close(false)?;
 
@@ -401,6 +378,9 @@ async fn main() -> Result<()> {
 
             log::info!("Gig reviews:");
             for (i, gig_review_result) in gig_page.get_gig_reviews()?.into_iter().enumerate() {
+                let fiverr_tab = get_fiverr_tab();
+                fiverr_tab.ping()?;
+
                 if i == 80 {
                     gig_repo.set_scrape_completed(gig_id).await?;
                 }
