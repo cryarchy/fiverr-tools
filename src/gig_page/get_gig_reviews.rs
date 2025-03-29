@@ -39,11 +39,14 @@ impl Iterator for GigReviewIterator {
                             log::error!("Error: {e} - {}", &bottom_selector);
                         }
                     }
-                let show_more_button_selector = Selector::new("#main-wrapper > .main-content .gig-page > .main .gig-page-reviews .reviews-wrap > div > button".to_owned());
-                match mut_self.tab.find_element(&show_more_button_selector) {
-                    Ok(show_more_button) => {
-                        show_more_button
-                            .click()?;
+                let load_more_button_selector = Selector::new("#main-wrapper > .main-content .gig-page > .main .gig-page-reviews .reviews-wrap > div > button".to_owned());
+                match mut_self.tab.find_element(&load_more_button_selector) {
+                    Ok(load_more_button) => {
+                        if load_more_button
+                            .click().is_err() {
+                                log::warn!("Error clicking 'Load more reviews button!'. Possibly at end of reviews list! Moving on ...");
+                                return Ok(None);
+                            };
                         match mut_self.tab.wait_for_element(&gig_review_el_selector) {
                             Ok(_) => return _next(mut_self),
                             Err(e) => {
@@ -89,8 +92,14 @@ impl Iterator for GigReviewIterator {
             let price_duration_els_selector = gig_review_el.selector().append(
                 "div:has(p:nth-child(1)):has(p:nth-child(2):last-child) > p:first-child",
             );
-            let mut price_duration_els = mut_self.tab
-                .find_elements(&price_duration_els_selector, false)?
+            let price_duration_els = mut_self.tab
+                .find_elements(&price_duration_els_selector, false)?;
+
+            if price_duration_els.is_empty() {
+                return Ok(None);
+            }
+
+            let mut price_duration_els = price_duration_els
                 .into_iter();
             let price = price_duration_els
                 .next()
