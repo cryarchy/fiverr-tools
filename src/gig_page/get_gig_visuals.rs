@@ -80,7 +80,9 @@ impl GigPage {
                                 "Gallery thumbnail at index {index} not visible. Clicking next button."
                             );
                             let next_button_selector = Selector::new("#main-wrapper > .main-content .gig-page > .main .gallery-thumbnails .nav-next".to_owned());
-                            self.tab.find_element(&next_button_selector)?.click()?;
+                            if let Ok(next_button) = self.tab.find_element(&next_button_selector) {
+                                next_button.click()?;
+                            }
                             sleep(Duration::from_millis(100));
                             if i == gallery_thumbnail_els_count {
                                 return Err(crate::Error::Unexpected(
@@ -131,9 +133,11 @@ impl GigPage {
                 while self.tab.find_element(&first_slide_selector).is_err() {
                     let modal_prev_button_selector =
                         Selector::new(".modal-package .modal-nav-prev".to_owned());
-                    self.tab
-                        .find_element(&modal_prev_button_selector)?
-                        .click()?;
+                    if let Ok(modal_prev_button) =
+                        self.tab.find_element(&modal_prev_button_selector)
+                    {
+                        modal_prev_button.click()?;
+                    }
                     sleep(Duration::from_millis(100));
                 }
                 for index in 1..=modal_slides_count {
@@ -162,9 +166,11 @@ impl GigPage {
                     log::debug!("Navigating to the next slide.");
                     let modal_next_button_selector =
                         Selector::new(".modal-package .modal-nav-next".to_owned());
-                    self.tab
-                        .find_element(&modal_next_button_selector)?
-                        .click()?;
+                    if let Ok(modal_next_button) =
+                        self.tab.find_element(&modal_next_button_selector)
+                    {
+                        modal_next_button.click()?;
+                    }
                     sleep(Duration::from_millis(100));
                 }
                 return Ok(gallery_visuals);
