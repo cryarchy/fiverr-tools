@@ -14,6 +14,10 @@ impl SiteNav {
         Self { tab }
     }
 
+    fn home_url() -> &'static str {
+        "https://www.fiverr.com/?source=top_nav"
+    }
+
     fn home_button_selector() -> Selector {
         Selector::new("#Header a.site-logo".to_owned())
     }
@@ -30,7 +34,18 @@ impl SiteNav {
     }
 
     pub fn go_home(&self) -> Result<(), crate::Error> {
-        self.get_home_button()?.click()?;
+        match self.get_home_button() {
+            Ok(anchor_el) => {
+                if let Err(e) = anchor_el.click() {
+                    log::error!("{e}");
+                    self.tab.navigate_to(Self::home_url())?;
+                }
+            }
+            Err(e) => {
+                log::error!("{e}");
+                self.tab.navigate_to(Self::home_url())?;
+            }
+        }
         self.tab
             .wait_for_element_with_custom_timeout(
                 &Self::home_card_selector(),
