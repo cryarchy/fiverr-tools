@@ -93,7 +93,7 @@ impl Iterator for GigReviewIterator {
                 "div:has(p:nth-child(1)):has(p:nth-child(2):last-child) > p:first-child",
             );
             let price_duration_els = mut_self.tab
-                .find_elements(&price_duration_els_selector, false)?;
+                .find_elements(&price_duration_els_selector, false).unwrap_or(Vec::with_capacity(0));
 
             if price_duration_els.is_empty() {
                 return Ok(None);
