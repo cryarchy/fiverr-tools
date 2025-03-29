@@ -32,6 +32,18 @@ impl<'a> GigCardsIterator<'a> {
     fn _next(&mut self) -> Result<Option<GigCard>, crate::Error> {
         loop {
             let selector = Self::selector().nth_child(self.current_index);
+
+            // Skip "Fiverr's Choice" gig cards
+            let gig_card_text = self
+                .tab
+                .find_element(&selector)?
+                .get_inner_text()?
+                .to_lowercase();
+            if gig_card_text.contains("fiverr") && gig_card_text.contains("choice") {
+                self.current_index += 1;
+                continue;
+            }
+
             let url_selector = selector.append(r#"a[aria-label="Go to gig"]"#);
             let gig_anchor = match self.tab.find_element(&url_selector) {
                 Ok(gig_anchor) => gig_anchor,
@@ -46,10 +58,12 @@ impl<'a> GigCardsIterator<'a> {
             let url = gig_anchor.get_expected_attribute_value("href")?;
             let ratings_count_selector =
                 selector.append(".orca-rating .ratings-count .rating-count-number");
-            let ratings_count = self
-                .tab
-                .find_element(&ratings_count_selector)?
-                .get_inner_text()?;
+            let Ok(ratings_count_el) = self.tab.find_element(&ratings_count_selector) else {
+                // skip gig cards without ratings
+                self.current_index += 1;
+                continue;
+            };
+            let ratings_count = ratings_count_el.get_inner_text()?;
 
             if ratings_count.contains("k") {
                 self.current_index += 1;
