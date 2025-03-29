@@ -62,7 +62,10 @@ impl GigPage {
         }
 
         let check_svg_els_selector = Selector::new("#main-wrapper > .main-content .gig-page > .main .gig-page-packages-table table tbody tr td span:has(svg)".to_owned());
-        let check_svg_els = self.tab.find_elements(&check_svg_els_selector, false)?;
+        let check_svg_els = self
+            .tab
+            .find_elements(&check_svg_els_selector, false)
+            .unwrap_or(Vec::with_capacity(0));
         let count_classes = |class: &str| class.split(' ').collect::<Vec<_>>().len();
         let mut checked_mark_class_count = 0;
         for svg_span_el in check_svg_els.into_iter() {
@@ -84,29 +87,31 @@ impl GigPage {
             let table_data_selector = table_row.selector().append("td");
             let row_data_els = self.tab.find_elements(&table_data_selector, true)?;
             let row_property = row_data_els[0].get_inner_text()?;
-            for (i, data_el) in row_data_els.iter().skip(1).enumerate() {
-                let span_selector = data_el.selector().append("span:has(svg)");
-                let data_value = match self.tab.find_element(&span_selector) {
-                    Ok(span) => {
-                        let span_class = span.get_attribute_value("class")?;
-                        match span_class {
-                            Some(span_class) => {
-                                (count_classes(&span_class) == checked_mark_class_count).to_string()
-                            }
+            if checked_mark_class_count != 0 {
+                for (i, data_el) in row_data_els.iter().skip(1).enumerate() {
+                    let span_selector = data_el.selector().append("span:has(svg)");
+                    let data_value = match self.tab.find_element(&span_selector) {
+                        Ok(span) => {
+                            let span_class = span.get_attribute_value("class")?;
+                            match span_class {
+                                Some(span_class) => (count_classes(&span_class)
+                                    == checked_mark_class_count)
+                                    .to_string(),
 
-                            None => {
-                                return Err(crate::Error::Unexpected(
-                                    "Encountered a span element without a class attribute"
-                                        .to_owned(),
-                                ));
+                                None => {
+                                    return Err(crate::Error::Unexpected(
+                                        "Encountered a span element without a class attribute"
+                                            .to_owned(),
+                                    ));
+                                }
                             }
                         }
-                    }
-                    Err(_) => data_el.get_inner_text()?,
-                };
-                gig_packages[i]
-                    .properties
-                    .insert(row_property.to_owned(), data_value);
+                        Err(_) => data_el.get_inner_text()?,
+                    };
+                    gig_packages[i]
+                        .properties
+                        .insert(row_property.to_owned(), data_value);
+                }
             }
         }
 
