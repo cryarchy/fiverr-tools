@@ -383,12 +383,30 @@ async fn main() -> Result<()> {
                 }
                 let gig_review = gig_review_result?;
                 log::info!("{:#?}", gig_review);
-                let rating = gig_review.rating.parse::<f64>()?;
+                let Ok(rating) = gig_review.rating.parse::<f64>() else {
+                    log::error!(
+                        "Error parsing the gig rating ({}) to a float value",
+                        gig_review.rating
+                    );
+                    continue;
+                };
                 let (price_range_min, price_range_max) =
-                    PRICE_RANGE_PARSER.get_range_tuple(&gig_review.price)?;
+                    match PRICE_RANGE_PARSER.get_range_tuple(&gig_review.price) {
+                        Ok(price_range) => price_range,
+                        Err(e) => {
+                            log::error!("{e}");
+                            continue;
+                        }
+                    };
                 let duration_string = STRING_CLEANER.as_simple_text(&gig_review.duration)?;
                 let mut duration_parts = duration_string.split(" ");
-                let duration_value = STRING_CLEANER.as_usize(duration_parts.next().unwrap())?;
+                let duration_value = match STRING_CLEANER.as_usize(duration_parts.next().unwrap()) {
+                    Ok(duration_value) => duration_value,
+                    Err(e) => {
+                        log::error!("{e}");
+                        continue;
+                    }
+                };
                 let duration_unit = duration_parts.next().unwrap().to_owned();
                 let create_params = db::gig_review_repo::CreateParams {
                     gig_id,
