@@ -1,3 +1,6 @@
+// TODO: Create visuals downloader application.
+// TODO: Add code to persist problem gigs so that they may be skipped.
+
 mod app_config;
 mod categories_menu;
 mod db;
@@ -79,8 +82,13 @@ async fn main() -> Result<()> {
     let browser =
         Browser::connect_with_timeout(app_config.browser_ws_url, Duration::from_secs(600))?;
 
-    let tab = browser.new_tab()?;
-    tab.close(false)?;
+    let refresh_browser = || {
+        let tab = browser.new_tab()?;
+        tab.close(false)?;
+        Result::<(), anyhow::Error>::Ok(())
+    };
+
+    refresh_browser()?;
 
     // Get the list of existing tabs/pages
     let get_fiverr_tab = || {
@@ -262,16 +270,17 @@ async fn main() -> Result<()> {
                     };
                     let seller_id = seller_repo.create(&create_params).await?;
 
-                    log::info!("Seller stats:");
-                    let seller_stats = gig_page.get_seller_stats()?;
-                    for stat in seller_stats {
-                        log::info!("\t {}: {}", stat.name, stat.value);
-                        let create_params = db::seller_stat_repo::CreateParams {
-                            seller_id,
-                            key: stat.name,
-                            value: stat.value,
-                        };
-                        seller_stat_repo.create(&create_params).await?;
+                    if let Ok(seller_stats) = gig_page.get_seller_stats() {
+                        log::info!("Seller stats:");
+                        for stat in seller_stats {
+                            log::info!("\t {}: {}", stat.name, stat.value);
+                            let create_params = db::seller_stat_repo::CreateParams {
+                                seller_id,
+                                key: stat.name,
+                                value: stat.value,
+                            };
+                            seller_stat_repo.create(&create_params).await?;
+                        }
                     }
 
                     seller_id
@@ -423,6 +432,8 @@ async fn main() -> Result<()> {
                 };
                 gig_review_repo.create(&create_params).await?;
             }
+
+            refresh_browser()?
         }
     }
 }
