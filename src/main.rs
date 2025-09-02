@@ -1,56 +1,786 @@
-// TODO: Create visuals downloader application.
-// TODO: Add code to persist problem gigs so that they may be skipped.
-
 mod app_config;
-mod categories_menu;
-mod db;
-mod error;
-mod gig_page;
-mod gigs_page;
-mod markup_interaction_error;
-mod price_range_parser;
-mod selector;
-mod site_nav;
-mod string_cleaner;
-mod wrapped;
 
-use std::{sync::LazyLock, time::Duration};
-
-use anyhow::Result;
-use app_config::AppConfig;
-use categories_menu::CategoriesMenu;
-use db::{
-    gig_category_gigs::GigCategoryGigs,
-    gig_category_repo::{GigCategoryRepo, ScrapeGigsOutput},
-    gig_faq_repo::GigFaqRepo,
-    gig_metadata_repo::GigMetadataRepo,
-    gig_package_feature_repo::GigPackageFeatureRepo,
-    gig_package_repo::GigPackageRepo,
-    gig_package_type_lookup::GigPackageTypeLookup,
-    gig_repo::GigRepo,
-    gig_review_repo::GigReviewRepo,
-    seller_repo::SellerRepo,
-    seller_stat_repo::SellerStatRepo,
-    visual_repo::VisualRepo,
-    visual_type_lookup::VisualTypeLookup,
+use std::{
+    cmp::Ordering,
+    path::{Path, PathBuf},
+    str::FromStr,
+    sync::Arc,
+    time::Duration,
 };
-use error::Error;
+
+use anyhow::{Result, anyhow};
+use app_config::AppConfig;
 use figment::{
     Figment,
     providers::{Format, Yaml},
 };
 use flexi_logger::Logger;
-use gig_page::GigPage;
-use gigs_page::GigsPage;
-use headless_chrome::Browser;
-use price_range_parser::PRICE_RANGE_PARSER;
-use site_nav::SiteNav;
-use sqlx::postgres::PgPoolOptions;
-use string_cleaner::STRING_CLEANER;
+use headless_chrome::{Browser, Element, Tab};
+use sqlx::{QueryBuilder, Sqlite, SqlitePool, sqlite::SqliteConnectOptions};
+use tokio::{fs, io::AsyncWriteExt, time::sleep};
 use url::Url;
-use wrapped::WrappedTab;
+use uuid::Uuid;
 
-static BASE_URL: LazyLock<Url> = LazyLock::new(|| Url::parse("https://www.fiverr.com/").unwrap());
+static BTN_CLICK_WAIT_SECS: u64 = 1;
+static BASE_URL: &str = "https://www.fiverr.com";
+
+struct CustomBrowser {
+    browser: Browser,
+}
+
+impl CustomBrowser {
+    fn new(debug_ws_url: String, idle_browser_timeout: Duration) -> Result<Self> {
+        let custom_browser = Self {
+            browser: Browser::connect_with_timeout(debug_ws_url, idle_browser_timeout)?,
+        };
+        custom_browser.refresh()?;
+        Ok(custom_browser)
+    }
+
+    fn get_fiverr_tab(&self) -> Result<Arc<Tab>> {
+        let tabs = self.browser.get_tabs().lock().unwrap();
+
+        let mut fiverr_tab = None;
+
+        for tab in tabs.iter() {
+            if tab.get_url().contains("fiverr") {
+                fiverr_tab = Some(tab.clone());
+                break;
+            } else {
+                tab.close(false)?;
+            }
+        }
+
+        fiverr_tab.ok_or(anyhow!(
+            "Could not get a tab with a url containing 'fiverr'"
+        ))
+    }
+
+    fn refresh(&self) -> Result<()> {
+        let tab = &self.browser.new_tab()?;
+        tab.close(false)?;
+        Ok(())
+    }
+}
+
+struct FiverrNav<'a> {
+    tab: &'a Arc<Tab>,
+}
+
+impl<'a> FiverrNav<'a> {
+    fn new(tab: &'a Arc<Tab>) -> Self {
+        Self { tab }
+    }
+
+    fn category_elements_selector() -> &'static str {
+        "#categories-menu-package ul.categories li"
+    }
+
+    fn category_element_selector(idx: usize) -> String {
+        format!("{} {}", Self::category_elements_selector(), idx)
+    }
+
+    fn menu_elements_selector() -> &'static str {
+        "ul.menu-bucket"
+    }
+
+    fn scroll_right_btn_selector() -> &'static str {
+        "#categories-menu-package button.right"
+    }
+
+    async fn scroll_right(&self) -> Result<()> {
+        let button = self.tab.find_element(Self::scroll_right_btn_selector())?;
+        button.click()?;
+        sleep(Duration::from_secs(BTN_CLICK_WAIT_SECS)).await;
+        Ok(())
+    }
+
+    fn get_category_el(&'a self, category_id: &str) -> Result<Element<'a>> {
+        let elements_selector = Self::category_elements_selector();
+        log::info!("Find elements: {elements_selector}");
+        let elements = self.tab.find_elements(elements_selector)?;
+        let mut category_element = None;
+        for (idx, element) in elements.into_iter().enumerate() {
+            log::info!("Find element: {elements_selector} {idx} a");
+            let anchor = element.find_element("a")?;
+            log::info!("Get attribute: {elements_selector} {idx} a.href");
+            let href = anchor.get_attribute_value("href")?.ok_or(anyhow!(format!(
+                "Element ({}) does not have a 'href' attribute",
+                Self::category_element_selector(idx)
+            )))?;
+            if href.contains(category_id) {
+                category_element = Some(element);
+                break;
+            }
+        }
+
+        category_element.ok_or(anyhow!(format!(
+            "Could not find category element '{}'",
+            category_id
+        )))
+    }
+
+    async fn scroll_category_el_into_view(&'a self, category_id: &str) -> Result<Element<'a>> {
+        loop {
+            let category_el = self.get_category_el(category_id)?;
+            log::info!("Get attribute: [{category_id}].style");
+            let style = category_el.get_attribute_value("style")?.ok_or(anyhow!(
+                "Category element ({category_id}) does not have a 'style' attribute"
+            ))?;
+            if style.contains("none") {
+                self.scroll_right().await?;
+            } else {
+                break Ok(category_el);
+            }
+        }
+    }
+
+    fn get_menu_el<'b>(category_el: Element<'b>, menu_id: &str) -> Result<Element<'b>> {
+        let elements_selector = Self::menu_elements_selector();
+        log::info!("Find elements: [el:category] {elements_selector}");
+        let elements = category_el.find_elements(elements_selector)?;
+        let mut menu_item_element = None;
+        for (menu_idx, menu_element) in elements.into_iter().enumerate() {
+            log::info!("Find elements: [el:category] {elements_selector}.nth-child({menu_idx}) li");
+            let menu_items = menu_element.find_elements("li")?;
+            for (menu_item_idx, element) in menu_items.into_iter().enumerate() {
+                log::info!("Find element: [el:li] {menu_item_idx} a");
+                let anchor = element.find_element("a")?;
+                log::info!("Get attribute: [el:li] {menu_item_idx} a");
+                let href = anchor.get_attribute_value("href")?.ok_or(anyhow!(format!(
+                    "Element ([el:li] {menu_item_idx} a) does not have a 'href' attribute",
+                )))?;
+                log::debug!("{href}");
+                if href.contains(menu_id) {
+                    menu_item_element = Some(element);
+                    break;
+                }
+            }
+            if menu_item_element.is_some() {
+                break;
+            }
+        }
+
+        menu_item_element.ok_or(anyhow!(format!(
+            "Could not find category element '{}'",
+            menu_id
+        )))
+    }
+
+    async fn go_to(&self, category_id: &str, menu_id: &str) -> Result<()> {
+        let category_el = self.scroll_category_el_into_view(category_id).await?;
+        log::info!("Mouse over: [{category_id}].style");
+        category_el.move_mouse_over()?;
+        log::info!("Wait for element: [{category_id}] .menu-bucket");
+        category_el.wait_for_element(".menu-bucket")?;
+        let menu_item_el = Self::get_menu_el(category_el, menu_id)?;
+        menu_item_el.click()?;
+        self.tab.wait_until_navigated()?;
+        Ok(())
+    }
+}
+
+struct ScrapedGigsStore {
+    db: SqlitePool,
+}
+
+impl ScrapedGigsStore {
+    fn new(db: SqlitePool) -> Self {
+        Self { db }
+    }
+
+    async fn is_scraped(&self, gig_url: &str) -> Result<bool> {
+        let record = sqlx::query!("SELECT count(*) as cnt FROM gigs WHERE url = $1", gig_url)
+            .fetch_one(&self.db)
+            .await?;
+        Ok(record.cnt > 0)
+    }
+
+    async fn save_visuals(&self, gig_id: String, visuals: Vec<VisualData>) -> Result<()> {
+        log::debug!("{:#?}", visuals);
+        let mut query_builder: QueryBuilder<Sqlite> =
+            QueryBuilder::new("INSERT INTO visuals(id, gig_id, file_path, visual_type)");
+
+        let visuals = visuals
+            .into_iter()
+            .map(|visual| {
+                let id = Uuid::new_v4().to_string();
+                (id, gig_id.to_owned(), visual.url, visual.typ.to_string())
+            })
+            .collect::<Vec<_>>();
+
+        query_builder.push_values(visuals, |mut b, (id, gig_id, file_path, visual_type)| {
+            b.push_bind(id)
+                .push_bind(gig_id)
+                .push_bind(file_path)
+                .push_bind(visual_type);
+        });
+
+        let query = query_builder.build();
+        query.execute(&self.db).await?;
+
+        Ok(())
+    }
+
+    async fn save(&self, gig: GigData) -> Result<()> {
+        let id = Uuid::new_v4().to_string();
+        sqlx::query!(
+            "INSERT INTO gigs(id, url, title, description, page) VALUES($1, $2, $3, $4, $5)",
+            id,
+            gig.url,
+            gig.title,
+            gig.description,
+            gig.page
+        )
+        .execute(&self.db)
+        .await?;
+        self.save_visuals(id, gig.visuals).await?;
+
+        Ok(())
+    }
+
+    async fn last_scraped_page(&self) -> Result<u32> {
+        let fetch_result = sqlx::query!("SELECT page FROM gigs ORDER BY page DESC LIMIT 1")
+            .fetch_one(&self.db)
+            .await;
+        match fetch_result {
+            Err(sqlx::Error::RowNotFound) => Ok(1),
+            Ok(record) => Ok(record.page as u32),
+            Err(e) => Err(e.into()),
+        }
+    }
+}
+
+struct MenuItemPage<'a> {
+    tab: &'a Arc<Tab>,
+    store: Arc<ScrapedGigsStore>,
+}
+
+impl<'a> MenuItemPage<'a> {
+    fn new(tab: &'a Arc<Tab>, store: Arc<ScrapedGigsStore>) -> Self {
+        Self { tab, store }
+    }
+
+    fn gig_cards_selector() -> &'static str {
+        "#main-wrapper .basic-gig-card"
+    }
+
+    fn get_gig_cards(&'a self) -> Result<Vec<Element<'a>>> {
+        let elements_selector = Self::gig_cards_selector();
+        log::info!("Wait for elements: {elements_selector}");
+        self.tab.wait_for_elements(elements_selector)
+    }
+
+    fn get_gig_orders_count<'b>(gig_card: &Element<'b>) -> Result<usize> {
+        log::info!("Find element: [ref:gig_card] .orca-rating > span");
+        let span = gig_card.find_element(".orca-rating > span")?;
+        log::info!("Get inner text: [ref:gig_card] .orca-rating > span");
+        let orders_count: usize = span
+            .get_inner_text()?
+            .replace(['(', ')'], "")
+            .trim()
+            .parse()
+            .unwrap_or(1000);
+        Ok(orders_count)
+    }
+
+    fn gig_order_count_gt_threshold<'b>(gig_card: &Element<'b>) -> Result<bool> {
+        let orders_count = Self::get_gig_orders_count(gig_card)?;
+        Ok(orders_count >= 100)
+    }
+
+    fn visit_gig<'b>(&self, gig_card: Element<'b>) -> Result<()> {
+        log::info!("Find element: [ref:gig_card] a");
+        let anchor = gig_card.find_element("a")?;
+        anchor.click()?;
+        self.tab.wait_until_navigated()?;
+        Ok(())
+    }
+
+    fn get_gig_url<'b>(gig_card: &Element<'b>) -> Result<String> {
+        log::info!("Find element: [ref:gig_card] a");
+        let anchor = gig_card.find_element("a")?;
+        log::info!("Get attribute: [el:gig_card] a");
+        let href = anchor.get_attribute_value("href")?.ok_or(anyhow!(
+            "Element ([el:gig_card] a) does not have a 'href' attribute",
+        ))?;
+        let stripped_url = QueryPathStripper::strip(&href);
+        UrlNormalizer::normalize(stripped_url)
+    }
+
+    fn next_gigs_page_btn_selector() -> &'static str {
+        r#"#main-wrapper .main-content a[aria-label="Next"][role="link"]"#
+    }
+
+    async fn next_gigs_page(&self) -> Result<()> {
+        let element_selector = Self::next_gigs_page_btn_selector();
+        log::info!("Wait for element: {element_selector}");
+        let next_page_btn = self.tab.wait_for_element(element_selector)?;
+        log::info!("Click: {element_selector}");
+        next_page_btn.click()?;
+        self.tab.wait_until_navigated()?;
+        sleep(Duration::from_secs(BTN_CLICK_WAIT_SECS)).await;
+        Ok(())
+    }
+
+    fn prev_gigs_page_btn_selector() -> &'static str {
+        r#"#main-wrapper .main-content a[aria-label="Previous"][role="link"]"#
+    }
+
+    async fn prev_gigs_page(&self) -> Result<()> {
+        let element_selector = Self::prev_gigs_page_btn_selector();
+        log::info!("Wait for element: {element_selector}");
+        let prev_page_btn = self.tab.wait_for_element(element_selector)?;
+        log::info!("Click: {element_selector}");
+        prev_page_btn.click()?;
+        self.tab.wait_until_navigated()?;
+        sleep(Duration::from_secs(BTN_CLICK_WAIT_SECS)).await;
+        Ok(())
+    }
+
+    fn get_page_count(&self) -> Result<u32> {
+        let page_url = self.tab.get_url();
+        let page_url = Url::parse(&page_url)?;
+        let page_count = page_url
+            .query_pairs()
+            .find_map(|(key, value)| match key == "page" {
+                true => Some(value.to_string()),
+                false => None,
+            })
+            .unwrap_or("1".to_string());
+        let page_count: u32 = page_count.parse()?;
+        Ok(page_count)
+    }
+
+    async fn go_to_page(&self, page: u32) -> Result<()> {
+        loop {
+            let current_page = self.get_page_count()?;
+            log::debug!("current page: {current_page}");
+            match current_page.cmp(&page) {
+                Ordering::Equal => break Ok(()),
+                Ordering::Greater => {
+                    self.prev_gigs_page().await?;
+                }
+                Ordering::Less => {
+                    self.next_gigs_page().await?;
+                }
+            }
+        }
+    }
+
+    async fn go_to_new_gig(&self) -> Result<u32> {
+        loop {
+            let gig_cards = self.get_gig_cards()?;
+            for (idx, card) in gig_cards.into_iter().enumerate() {
+                log::info!("Gig index: {idx}");
+                if Self::gig_order_count_gt_threshold(&card)? {
+                    let gig_url = Self::get_gig_url(&card)?;
+                    log::debug!("Gig URL: {gig_url}");
+                    log::debug!("is scraped: {}", self.store.is_scraped(&gig_url).await?);
+                    if self.store.is_scraped(&gig_url).await? {
+                        log::debug!("continuing...");
+                        continue;
+                    }
+                    self.visit_gig(card)?;
+                    return self.get_page_count();
+                }
+            }
+            self.next_gigs_page().await?;
+        }
+    }
+}
+
+struct GigPage<'a> {
+    tab: &'a Arc<Tab>,
+    page: u32,
+}
+
+#[derive(Debug)]
+enum SlideType {
+    Video,
+    Image,
+    Pdf,
+}
+
+impl std::fmt::Display for SlideType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let v = match self {
+            SlideType::Image => "image",
+            SlideType::Video => "video",
+            SlideType::Pdf => "pdf",
+        };
+        f.write_str(v)
+    }
+}
+
+#[derive(Debug)]
+struct VisualData {
+    url: String,
+    typ: SlideType,
+}
+
+struct GigData {
+    url: String,
+    title: String,
+    description: String,
+    visuals: Vec<VisualData>,
+    page: u32,
+}
+
+impl<'a> GigPage<'a> {
+    fn new(tab: &'a Arc<Tab>, page: u32) -> Self {
+        Self { tab, page }
+    }
+
+    fn title_selector() -> &'static str {
+        "#main-wrapper .gig-page .gig-overview h1"
+    }
+
+    fn about_selector() -> &'static str {
+        "#main-wrapper .gig-page .description-content"
+    }
+
+    fn get_url(&self) -> Result<String> {
+        let url = self.tab.get_url();
+        let stripped_url = QueryPathStripper::strip(&url);
+        UrlNormalizer::normalize(stripped_url)
+    }
+
+    fn get_about(&self) -> Result<String> {
+        let element_selector = Self::about_selector();
+        log::info!("Find element: {element_selector}");
+        let description_el = self.tab.find_element(element_selector)?;
+        log::info!("Get content: {element_selector}");
+        let description = description_el.get_content()?;
+        Ok(description)
+    }
+
+    fn get_title(&self) -> Result<String> {
+        let element_selector = Self::title_selector();
+        log::info!("Find element: {element_selector}");
+        let title_el = self.tab.find_element(element_selector)?;
+        log::info!("Get inner text: {element_selector}");
+        let title = title_el.get_inner_text()?;
+        Ok(title)
+    }
+
+    fn current_slide_selector() -> &'static str {
+        "#main-wrapper .gig-page .gallery-slideshow .slideshow-slide.current .slide"
+    }
+
+    fn next_slide_selector() -> &'static str {
+        "#main-wrapper .gig-page .gallery-slideshow .nav-next"
+    }
+
+    fn current_gallery_slide_selector() -> &'static str {
+        ".gallery-modal .slideshow-slide.current .slide"
+    }
+
+    fn gallery_modal_selector() -> &'static str {
+        ".gallery-modal"
+    }
+
+    fn gallery_next_slide_btn_selector() -> &'static str {
+        ".gallery-modal .modal-nav-next"
+    }
+
+    fn gallery_close_btn_selector() -> &'static str {
+        ".gallery-modal .modal-close"
+    }
+
+    fn get_slide_type<'b>(slide_el: &Element<'b>) -> Result<SlideType> {
+        log::info!("Get attribute value: [ref:slide]");
+        let class = slide_el.get_attribute_value("class")?.ok_or(anyhow!(
+            "Element ([ref:slide] does not have the attribute 'class')"
+        ))?;
+        if class.contains("video") {
+            Ok(SlideType::Video)
+        } else if class.contains("image") {
+            Ok(SlideType::Image)
+        } else {
+            Ok(SlideType::Pdf)
+        }
+    }
+
+    async fn switch_to_next_slide(&self) -> Result<()> {
+        let element_selector = Self::next_slide_selector();
+        log::info!("Find element: {element_selector}");
+        let next_btn = self.tab.find_element(element_selector)?;
+        log::info!("Click: {element_selector}");
+        next_btn.click()?;
+        sleep(Duration::from_secs(BTN_CLICK_WAIT_SECS)).await;
+        Ok(())
+    }
+
+    async fn close_gallery(&self) -> Result<()> {
+        let element_selector = Self::gallery_close_btn_selector();
+        log::info!("Find element: {element_selector}");
+        let close_btn = self.tab.find_element(element_selector)?;
+        log::info!("Click: {element_selector}");
+        close_btn.click()?;
+        sleep(Duration::from_secs(BTN_CLICK_WAIT_SECS)).await;
+        Ok(())
+    }
+
+    async fn switch_to_next_gallery_slide(&self) -> Result<()> {
+        let element_selector = Self::gallery_next_slide_btn_selector();
+        log::info!("Find element: {element_selector}");
+        if let Ok(next_btn) = self.tab.find_element(element_selector) {
+            log::info!("Click: {element_selector}");
+            next_btn.click()?;
+            sleep(Duration::from_secs(BTN_CLICK_WAIT_SECS)).await;
+        }
+        Ok(())
+    }
+
+    async fn open_slideshow(&self) -> Result<()> {
+        loop {
+            let element_selector = Self::gallery_modal_selector();
+            log::info!("Find element: {element_selector}");
+            let gallery_modal = self.tab.find_element(element_selector);
+            if gallery_modal.is_ok() {
+                break Ok(());
+            }
+            let element_selector = Self::current_slide_selector();
+            log::info!("Find element: {element_selector}");
+            let current_slide_el = self.tab.find_element(element_selector)?;
+            match Self::get_slide_type(&current_slide_el)? {
+                SlideType::Image => {
+                    log::info!("Click: {element_selector}");
+                    current_slide_el.click()?;
+                }
+                _ => {
+                    self.switch_to_next_slide().await?;
+                }
+            }
+        }
+    }
+
+    async fn get_visuals(&self) -> Result<Vec<(String, SlideType)>> {
+        self.open_slideshow().await?;
+        let mut visuals = Vec::new();
+        let visual_exists = |visuals: &mut Vec<(String, SlideType)>, key: &str| {
+            visuals.iter().any(|(url, _)| url == key)
+        };
+        loop {
+            let element_selector = Self::current_gallery_slide_selector();
+            log::info!("Find element: {element_selector}");
+            let current_slide = self.tab.find_element(element_selector)?;
+            let slide_type = Self::get_slide_type(&current_slide)?;
+            match slide_type {
+                SlideType::Image => {
+                    log::info!("Find element: {element_selector} img");
+                    let image_el = current_slide.find_element("img")?;
+                    log::info!("Get attribute value: {element_selector} img.src");
+                    let source = image_el.get_attribute_value("src")?.ok_or(anyhow!(
+                        "Element ({element_selector} img) has no attribute 'src'."
+                    ))?;
+                    if visual_exists(&mut visuals, &source) {
+                        break;
+                    }
+                    visuals.push((source, SlideType::Image));
+                }
+                SlideType::Video => {
+                    log::info!("Find element: {element_selector} button");
+                    let play_btn = current_slide.find_element("button")?;
+                    log::info!("Click: {element_selector} button");
+                    play_btn.click()?;
+                    log::info!("Wait for element: {element_selector} video");
+                    let video_el = current_slide.wait_for_element("video")?;
+                    log::info!("Get attribute value: {element_selector} video.src");
+                    let source = video_el.get_attribute_value("src")?.ok_or(anyhow!(
+                        "Element ({element_selector} video) has no attribute 'src'."
+                    ))?;
+                    if visual_exists(&mut visuals, &source) {
+                        break;
+                    }
+                    visuals.push((source, SlideType::Video));
+                }
+                _ => (),
+            }
+            self.switch_to_next_gallery_slide().await?;
+        }
+        self.close_gallery().await?;
+        Ok(visuals)
+    }
+
+    async fn scrape(&self) -> Result<GigData> {
+        let url = self.get_url()?;
+        let description = self.get_about()?;
+        let title = self.get_title()?;
+        ModalCloser::close_open_modal(self.tab).await?;
+        let visuals = self
+            .get_visuals()
+            .await?
+            .into_iter()
+            .map(|visual| VisualData {
+                url: visual.0,
+                typ: visual.1,
+            })
+            .collect();
+        Ok(GigData {
+            url,
+            title,
+            description,
+            visuals,
+            page: self.page,
+        })
+    }
+}
+
+struct ModalCloser {}
+
+impl ModalCloser {
+    fn open_modal_close_btn_selector() -> &'static str {
+        r#"article[aria-modal="true"][role="dialog"] button:has(svg)"#
+    }
+
+    async fn close_open_modal(tab: &Arc<Tab>) -> Result<()> {
+        let element_selector = Self::open_modal_close_btn_selector();
+        log::info!("Find element: {element_selector}");
+        if let Ok(modal_close_btn) = tab.find_element(element_selector) {
+            log::info!("Click: {element_selector}");
+            modal_close_btn.click()?;
+            sleep(Duration::from_secs(BTN_CLICK_WAIT_SECS)).await;
+        }
+        Ok(())
+    }
+}
+
+struct ErrorPageDetector {}
+
+impl ErrorPageDetector {
+    fn error_code_selector() -> &'static str {
+        "body > main > article > code"
+    }
+
+    fn figcaption_selector() -> &'static str {
+        "body > main > figure > figcaption > h1"
+    }
+
+    fn is_error_page(tab: &Arc<Tab>) -> Result<bool> {
+        let element_selector = Self::error_code_selector();
+        log::info!("Find element: {element_selector}");
+        if let Ok(code_el) = tab.find_element(element_selector) {
+            log::info!("Get inner text: {element_selector}");
+            let text = code_el.get_inner_text()?;
+            if text.contains("ERRCODE") {
+                return Ok(true);
+            }
+        }
+
+        let element_selector = Self::figcaption_selector();
+        log::info!("Find element: {element_selector}");
+        if let Ok(caption_el) = tab.find_element(element_selector) {
+            log::info!("Get inner text: {element_selector}");
+            let text = caption_el.get_inner_text()?;
+            if text.contains("no time") {
+                return Ok(true);
+            }
+        }
+
+        Ok(false)
+    }
+
+    async fn process(tab: &Arc<Tab>) -> Result<()> {
+        let element_selector = Self::error_code_selector();
+        log::info!("Find element: {element_selector}");
+        if Self::is_error_page(tab)? {
+            log::info!("Reload tab");
+            tab.reload(true, None)?;
+            sleep(Duration::from_secs(BTN_CLICK_WAIT_SECS)).await;
+        }
+        Ok(())
+    }
+}
+
+struct QueryPathStripper {}
+
+impl QueryPathStripper {
+    fn strip(url: &str) -> &str {
+        url.split("?").next().unwrap()
+    }
+}
+
+struct UrlNormalizer {}
+
+impl UrlNormalizer {
+    fn normalize(url: &str) -> Result<String> {
+        if url.trim().starts_with('/') {
+            let mut parsed_url = Url::parse(BASE_URL)?;
+            parsed_url.set_path(url);
+            Ok(parsed_url.into())
+        } else {
+            let url = Url::parse(url)?;
+            Ok(url.into())
+        }
+    }
+}
+
+struct ResourceDownloader {
+    download_dir: PathBuf,
+}
+
+impl ResourceDownloader {
+    async fn new(download_dir: &str) -> Result<Self> {
+        let download_dir = Path::new(download_dir).to_path_buf();
+        fs::create_dir_all(&download_dir).await?;
+        Ok(Self { download_dir })
+    }
+
+    pub async fn download_media_files(&self, visuals: Vec<VisualData>) -> Result<Vec<VisualData>> {
+        let client = reqwest::Client::new();
+        let mut results = Vec::new();
+
+        for visual in visuals {
+            let file_path = self.download_single_file(&client, &visual.url).await?;
+            let file_path_str = file_path
+                .to_str()
+                .ok_or(anyhow!("Encountered path without string"))?
+                .to_owned();
+            results.push(VisualData {
+                url: file_path_str,
+                typ: visual.typ,
+            });
+        }
+
+        Ok(results)
+    }
+
+    async fn download_single_file(&self, client: &reqwest::Client, uri: &str) -> Result<PathBuf> {
+        // Parse and validate URL
+        let url = Url::parse(uri)?;
+
+        // Extract file extension from URL path
+        let path = url.path();
+        let extension = Path::new(path)
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .unwrap_or(".mp4")
+            .to_lowercase();
+
+        // Generate UUID for new filename
+        let uuid = Uuid::new_v4();
+        let uuid_filename = format!("{}.{}", uuid, extension);
+
+        // Download the file
+        let response = client.get(uri).send().await?;
+
+        if !response.status().is_success() {
+            return Err(response.error_for_status().unwrap_err().into());
+        }
+
+        let bytes = response.bytes().await?;
+
+        // Write to file
+        let file_path = self.download_dir.join(&uuid_filename);
+        let mut file = fs::File::create(&file_path).await?;
+        file.write_all(&bytes).await?;
+        file.flush().await?;
+
+        Ok(file_path)
+    }
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -60,380 +790,58 @@ async fn main() -> Result<()> {
 
     Logger::try_with_str(app_config.log_level)?.start()?;
 
-    let pool = PgPoolOptions::new()
-        .max_connections(5)
-        .connect(&app_config.database_url)
-        .await?;
+    let connection_options = SqliteConnectOptions::from_str(&app_config.database_url)
+        .unwrap()
+        .create_if_missing(true);
 
-    let gig_category_repo = GigCategoryRepo::new(pool.clone());
-    let gig_repo = GigRepo::new(pool.clone());
-    let gig_category_gigs = GigCategoryGigs::new(pool.clone());
-    let seller_repo = SellerRepo::new(pool.clone());
-    let seller_stat_repo = SellerStatRepo::new(pool.clone());
-    let gig_metadata_repo = GigMetadataRepo::new(pool.clone());
-    let visual_type_lookup = VisualTypeLookup::new(pool.clone());
-    let visual_repo = VisualRepo::new(pool.clone());
-    let gig_package_type_lookup = GigPackageTypeLookup::new(pool.clone());
-    let gig_package_repo = GigPackageRepo::new(pool.clone());
-    let gig_package_feature_repo = GigPackageFeatureRepo::new(pool.clone());
-    let gig_faq_repo = GigFaqRepo::new(pool.clone());
-    let gig_review_repo = GigReviewRepo::new(pool.clone());
+    let db_pool = SqlitePool::connect_with(connection_options).await?;
+    let gigs_store = Arc::new(ScrapedGigsStore::new(db_pool));
 
-    let browser =
-        Browser::connect_with_timeout(app_config.browser_ws_url, Duration::from_secs(600))?;
+    let resource_downloader = ResourceDownloader::new(&app_config.download_dir).await?;
 
-    let refresh_browser = || {
-        let tab = browser.new_tab()?;
-        tab.close(false)?;
-        Result::<(), anyhow::Error>::Ok(())
-    };
+    let browser = CustomBrowser::new(app_config.browser_ws_url, Duration::from_secs(600))?;
 
-    refresh_browser()?;
-
-    // Get the list of existing tabs/pages
-    let get_fiverr_tab = || {
-        let tabs = browser.get_tabs().lock().unwrap();
-
-        let mut fiverr_tab = None;
-
-        for tab in tabs.iter() {
-            if tab.get_url().contains("fiverr") {
-                fiverr_tab = Some(tab);
-                break;
-            }
-        }
-
-        WrappedTab::new((*fiverr_tab.unwrap()).clone())
-    };
-
-    let fiverr_tab = get_fiverr_tab();
+    let mut fiverr_tab = browser.get_fiverr_tab()?;
     log::info!("Fiverr tab title: {}", fiverr_tab.get_title()?);
 
+    ModalCloser::close_open_modal(&fiverr_tab).await?;
+
     loop {
-        let page_nav = SiteNav::new(get_fiverr_tab());
-        page_nav.go_home()?;
+        ErrorPageDetector::process(&fiverr_tab).await?;
+        let fiverr_nav = FiverrNav::new(&fiverr_tab);
 
-        let categories_menu = CategoriesMenu::new(get_fiverr_tab());
-        // get a gig category
-        for category in categories_menu.get_gig_categories()? {
-            let category = category?;
-            let category_url = BASE_URL.join(&category.url)?;
-            log::info!(
-                "Processing: {} > {} > {} ({})",
-                category.main_category,
-                category.category_group,
-                category.name,
-                category_url
-            );
+        fiverr_nav.go_to("programming-tech", "business").await?;
+        // fiverr_nav.go_to("data", "text-analysis-nlp")?;
 
-            // get the record associated with the gig category
-            let category_record = gig_category_repo
-                .get_scrape_gigs(category_url.path())
-                .await?;
-            let category_record = match category_record {
-                Some(category_record) => category_record,
-                None => {
-                    // create a record for the gig category if one does not exist
-                    let category_name = category.name.to_owned();
-                    let category_record_id = gig_category_repo
-                        .create(&db::gig_category_repo::CreateParams {
-                            path: category_url.path().to_owned(),
-                            name: category.name,
-                            sub_group_name: category.category_group,
-                            main_group_name: category.main_category,
-                        })
-                        .await?;
-                    ScrapeGigsOutput {
-                        scrape_gigs: false,
-                        name: category_name,
-                        id: category_record_id,
-                    }
-                }
-            };
+        let last_scraped_page = gigs_store.last_scraped_page().await?;
 
-            // skip scraping the record if scrape_gigs = false
-            if !category_record.scrape_gigs {
-                continue;
-            }
+        let menu_item_page = MenuItemPage::new(&fiverr_tab, gigs_store.clone());
+        menu_item_page.go_to_page(last_scraped_page).await?;
+        let gig_page = menu_item_page.go_to_new_gig().await?;
 
-            // delete all partially scraped gigs
-            let deleted_records_count = gig_repo.delete_partially_scraped_gigs().await?;
-            log::info!("Deleted {deleted_records_count} partially scraped gigs");
+        // close current tab since new tab is opened when a gig card is clicked.
 
-            // get the minimum count of all gigs per category
-            let minimum_gigs_per_category =
-                gig_category_gigs.least_gigs_count_for_categories().await?;
+        fiverr_tab.close(true)?;
 
-            // get the gig count for the current category
-            let current_gig_category_gigs_count =
-                gig_repo.count_for_category(category_record.id).await?;
+        sleep(Duration::from_secs(5)).await;
 
-            // skip scraping if the current category does not have a gigs count equal to the lowest gigs count per category
-            if current_gig_category_gigs_count != minimum_gigs_per_category {
-                continue;
-            }
+        fiverr_tab = browser.get_fiverr_tab()?;
 
-            // navigate to the current category's gigs page
-            let fiverr_tab = get_fiverr_tab();
-            fiverr_tab.navigate_to(category_url.as_str())?;
-            fiverr_tab.wait_for_element_with_custom_timeout(
-                &GigsPage::page_number_els_selector(),
-                Duration::from_secs(60),
-            )?;
-
-            // get the page of the last scraped gig
-            let mut last_gigs_page = match minimum_gigs_per_category {
-                0 => 1,
-                _ => match gig_repo
-                    .get_page_of_last_scraped_gig(category_record.id)
-                    .await?
-                {
-                    Some(page) => page,
-                    None => {
-                        log::warn!("Application not expected to reach this point!");
-                        1
-                    }
-                },
-            };
-
-            // find the first gig within the category that does not have an associated record in the database
-            let gigs_page = GigsPage::new(get_fiverr_tab());
-            let mut gig_to_scrape = None;
-            'outer: loop {
-                // go the the gigs page from which the last scraped gig was found
-                log::info!("Navigating to page {last_gigs_page}");
-                if !gigs_page.go_to_page(last_gigs_page as usize)? {
-                    break;
-                }
-
-                for gig_card in gigs_page.gigs()? {
-                    let gig_card = gig_card?;
-                    let gig_url = BASE_URL.join(&gig_card.url)?;
-                    let gig_path = gig_url.path();
-                    let gig_record_exists = gig_repo.exists_by_path(gig_path).await?;
-                    if gig_record_exists {
-                        log::info!("{gig_path} - scraped");
-                        continue;
-                    }
-                    gig_to_scrape = Some(gig_url);
-                    break 'outer;
-                }
-
-                last_gigs_page += 1;
-            }
-
-            let Some(gig_to_scrape_url) = gig_to_scrape else {
-                log::warn!(
-                    "No more gigs to scrape in the {} category!",
-                    category_record.name
-                );
-                continue;
-            };
-
-            // navigate to the gig's page
-            let fiverr_tab = get_fiverr_tab();
-            fiverr_tab.navigate_to(gig_to_scrape_url.as_str())?;
-            fiverr_tab.wait_for_element_with_custom_timeout(
-                &GigPage::seller_stats_selector(),
-                Duration::from_secs(60),
-            )?;
-            fiverr_tab.wait_for_element_with_custom_timeout(
-                &GigPage::title_selector(),
-                Duration::from_secs(60),
-            )?;
-
-            let gig_page = GigPage::new(get_fiverr_tab());
-
-            let Some(seller_username) = gig_to_scrape_url.path().split("/").nth(1) else {
-                log::error!("Error getting seller's username from gig page's URL!");
-                break;
-            };
-
-            let seller_id = match seller_repo.get_id(seller_username).await? {
-                Some(seller_id) => seller_id,
-                None => {
-                    // scrape seller information if the seller's information does not exist in the database
-                    let seller_rating = gig_page.get_seller_rating()?;
-                    log::info!("Seller rating: {seller_rating}");
-                    let seller_level = gig_page.get_seller_level()?;
-                    log::info!("Seller level: {seller_level}");
-                    let seller_review_count = gig_page.get_seller_ratings_count()?;
-                    log::info!("Seller reviews count: {seller_review_count}");
-                    let seller_description = gig_page.get_seller_description()?;
-                    log::info!("Seller description: {seller_description}");
-                    let create_params = db::seller_repo::CreateParams {
-                        username: seller_username.to_owned(),
-                        rating: seller_rating,
-                        level: seller_level,
-                        reviews_count: seller_review_count as i64,
-                        description: seller_description,
-                    };
-                    let seller_id = seller_repo.create(&create_params).await?;
-
-                    if let Ok(seller_stats) = gig_page.get_seller_stats() {
-                        log::info!("Seller stats:");
-                        for stat in seller_stats {
-                            log::info!("\t {}: {}", stat.name, stat.value);
-                            let create_params = db::seller_stat_repo::CreateParams {
-                                seller_id,
-                                key: stat.name,
-                                value: stat.value,
-                            };
-                            seller_stat_repo.create(&create_params).await?;
-                        }
-                    }
-
-                    seller_id
-                }
-            };
-
-            let gig_path = gig_to_scrape_url.path().to_owned();
-            let gig_title = gig_page.get_title()?;
-            log::info!("Gig title: {gig_title}");
-            let gig_rating = gig_page.get_gig_rating()?;
-            log::info!("Rating: {gig_rating}");
-            let gig_reviews_count = gig_page.get_gig_reviews_count()?;
-            log::info!("Reviews count: {gig_reviews_count}");
-            let gig_description = gig_page.get_gig_description()?;
-            log::info!("Description: {gig_description}");
-
-            let create_params = db::gig_repo::CreateParams {
-                path: gig_path,
-                title: gig_title,
-                rating: gig_rating,
-                reviews_count: gig_reviews_count as i64,
-                description: gig_description,
-                page: last_gigs_page,
-                seller_id,
-                category_id: category_record.id,
-            };
-            let gig_id = gig_repo.create(&create_params).await?;
-
-            log::info!("Metadata:");
-            let gig_metadata = gig_page.get_gig_metadata()?;
-            for metadata in gig_metadata {
-                log::info!("\t {}: {}", metadata.name, metadata.values.join(", "));
-                let create_params = db::gig_metadata_repo::CreateParams {
-                    gig_id,
-                    key: metadata.name,
-                    values: metadata.values,
-                };
-                gig_metadata_repo.create(&create_params).await?;
-            }
-
-            let gallery_visuals = gig_page.get_gig_visuals()?;
-            log::info!("Gallery visuals:");
-            for visual in gallery_visuals {
-                log::info!("\t {:?}: {}", visual.r#type(), visual.value());
-                let visual_type_id = match visual_type_lookup.get_type_id(visual.r#type()).await? {
-                    Some(visual_type_id) => visual_type_id,
-                    None => visual_type_lookup.create(visual.r#type()).await?,
-                };
-                let create_params = db::visual_repo::CreateParams {
-                    gig_id,
-                    url: visual.value().to_owned(),
-                    visual_type: visual_type_id,
-                };
-                visual_repo.create(&create_params).await?;
-            }
-            gig_page.close_visuals_modal()?;
-
-            log::info!("Gig packages:");
-            let gig_packages = gig_page.get_gig_packages()?;
-            for package in gig_packages {
-                log::info!(
-                    "\t {} - {} @ {}",
-                    package.r#type,
-                    package.title,
-                    package.price
-                );
-                let gig_package_type =
-                    match gig_package_type_lookup.get_type_id(&package.r#type).await? {
-                        Some(gig_package_type) => gig_package_type,
-                        None => gig_package_type_lookup.create(&package.r#type).await?,
-                    };
-                let create_params = db::gig_package_repo::CreateParams {
-                    r#type: gig_package_type,
-                    price: package.price as f64,
-                    title: package.title,
-                    description: package.description,
-                    gig_id,
-                    delivery_time: package.delivery_time,
-                };
-                let package_id = gig_package_repo.create(&create_params).await?;
-                let package_properties = package.properties;
-                for (key, value) in package_properties.into_iter() {
-                    log::info!("\t\t {}: {}", key, value);
-                    let create_params = db::gig_package_feature_repo::CreateParams {
-                        package_id,
-                        key,
-                        value,
-                    };
-                    gig_package_feature_repo.create(&create_params).await?;
-                }
-            }
-
-            log::info!("Gig FAQs:");
-            for result in gig_page.get_gig_faqs()? {
-                let gig_faq = result?;
-                log::info!("Question: {}\nAnswer: {}", gig_faq.question, gig_faq.answer);
-                let create_params = db::gig_faq_repo::CreateParams {
-                    gig_id,
-                    question: gig_faq.question,
-                    answer: gig_faq.answer,
-                };
-                gig_faq_repo.create(&create_params).await?;
-            }
-
-            log::info!("Gig reviews:");
-            for (i, gig_review_result) in gig_page.get_gig_reviews()?.into_iter().enumerate() {
-                let fiverr_tab = get_fiverr_tab();
-                fiverr_tab.ping()?;
-
-                if i == 80 {
-                    gig_repo.set_scrape_completed(gig_id).await?;
-                }
-                let gig_review = gig_review_result?;
-                log::info!("{:#?}", gig_review);
-                let Ok(rating) = gig_review.rating.parse::<f64>() else {
-                    log::error!(
-                        "Error parsing the gig rating ({}) to a float value",
-                        gig_review.rating
-                    );
-                    continue;
-                };
-                let (price_range_min, price_range_max) =
-                    match PRICE_RANGE_PARSER.get_range_tuple(&gig_review.price) {
-                        Ok(price_range) => price_range,
-                        Err(e) => {
-                            log::error!("{e}");
-                            continue;
-                        }
-                    };
-                let duration_string = STRING_CLEANER.as_simple_text(&gig_review.duration)?;
-                let mut duration_parts = duration_string.split(" ");
-                let duration_value = match STRING_CLEANER.as_usize(duration_parts.next().unwrap()) {
-                    Ok(duration_value) => duration_value,
-                    Err(e) => {
-                        log::error!("{e}");
-                        continue;
-                    }
-                };
-                let duration_unit = duration_parts.next().unwrap().to_owned();
-                let create_params = db::gig_review_repo::CreateParams {
-                    gig_id,
-                    country: gig_review.country,
-                    rating,
-                    price_range_min: price_range_min as i64,
-                    price_range_max: price_range_max as i64,
-                    duration_value: duration_value as i64,
-                    duration_unit,
-                    description: gig_review.description,
-                };
-                gig_review_repo.create(&create_params).await?;
-            }
-
-            refresh_browser()?
-        }
+        let gig_page = GigPage::new(&fiverr_tab, gig_page);
+        let gig_data = gig_page.scrape().await?;
+        let visuals = resource_downloader
+            .download_media_files(gig_data.visuals)
+            .await?;
+        log::debug!("Gig URL: {}", gig_data.url);
+        let gig_data = GigData {
+            url: gig_data.url,
+            title: gig_data.title,
+            description: gig_data.description,
+            page: gig_data.page,
+            visuals,
+        };
+        gigs_store.save(gig_data).await?;
     }
+
+    Ok(())
 }

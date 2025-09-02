@@ -7,3 +7,5 @@ app-config.yaml
 .env
 /checker
 checker.tar.gz
+/*.db
+/visuals
