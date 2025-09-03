@@ -327,6 +327,28 @@ impl<'a> MenuItemPage<'a> {
         r#"#main-wrapper .main-content a[aria-label="Previous"][role="link"]"#
     }
 
+    fn pagination_selector() -> &'static str {
+        r#"#main-wrapper .main-content div:has(>a[aria-label="Next"][role="link"]"#
+    }
+
+    fn get_target_page_anchor(&'a self, target_page: u32) -> Result<Option<Element<'a>>> {
+        let element_selector = Self::pagination_selector();
+        log::info!("Wait for element: {element_selector}");
+        let pagination_el = self.tab.wait_for_element(element_selector)?;
+        log::info!("Find elements: {element_selector} a");
+        for (idx, element) in pagination_el.find_elements("a")?.into_iter().enumerate() {
+            log::info!("Get inner text: {element_selector} a.{idx}");
+            let pagination_item_text = element.get_inner_text()?;
+            let pagination_item_value = pagination_item_text.trim();
+            if let Ok(pagination_item_value) = pagination_item_value.parse::<u32>()
+                && pagination_item_value == target_page
+            {
+                return Ok(Some(element));
+            }
+        }
+        Ok(None)
+    }
+
     async fn prev_gigs_page(&self) -> Result<()> {
         let element_selector = Self::prev_gigs_page_btn_selector();
         log::info!("Wait for element: {element_selector}");
@@ -362,7 +384,14 @@ impl<'a> MenuItemPage<'a> {
                     self.prev_gigs_page().await?;
                 }
                 Ordering::Less => {
-                    self.next_gigs_page().await?;
+                    if let Some(target_page_a) = self.get_target_page_anchor(page)? {
+                        log::info!("Click: [ref:target_page_a]");
+                        target_page_a.click()?;
+                        self.tab.wait_until_navigated()?;
+                        sleep(Duration::from_secs(BTN_CLICK_WAIT_SECS)).await;
+                    } else {
+                        self.next_gigs_page().await?;
+                    }
                 }
             }
         }
