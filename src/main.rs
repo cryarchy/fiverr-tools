@@ -15,7 +15,10 @@ use figment::{
     providers::{Format, Yaml},
 };
 use flexi_logger::Logger;
-use headless_chrome::{Browser, Element, Tab};
+use headless_chrome::{
+    Browser, Element, Tab,
+    protocol::cdp::{DOM, Runtime::RemoteObject},
+};
 use sqlx::{QueryBuilder, Sqlite, SqlitePool, sqlite::SqliteConnectOptions};
 use tokio::{fs, io::AsyncWriteExt, time::sleep};
 use url::Url;
@@ -331,10 +334,34 @@ impl<'a> MenuItemPage<'a> {
         r#"#main-wrapper .main-content div:has(>a[aria-label="Next"][role="link"]"#
     }
 
+    fn get_pagination_element(&self) -> Result<Element<'a>> {
+        let element_selector = Self::next_gigs_page_btn_selector();
+        log::info!("Wait for element: {element_selector}");
+        let next_page_btn = self.tab.wait_for_element(element_selector)?;
+        let remote_object: RemoteObject =
+            next_page_btn.call_js_fn("function() { return this.parentElement; }", vec![], false)?;
+
+        let object_id = remote_object.object_id.unwrap();
+
+        let parent_node = self
+            .tab
+            .call_method(DOM::DescribeNode {
+                object_id: Some(object_id.clone()),
+                depth: Some(1),
+                pierce: Some(true),
+                backend_node_id: None,
+                node_id: None,
+            })?
+            .node;
+
+        Element::new(self.tab, parent_node.backend_node_id)
+    }
+
     fn get_target_page_anchor(&'a self, target_page: u32) -> Result<Option<Element<'a>>> {
         let element_selector = Self::pagination_selector();
-        log::info!("Wait for element: {element_selector}");
-        let pagination_el = self.tab.wait_for_element(element_selector)?;
+        // log::info!("Wait for element: {element_selector}");
+        // let pagination_el = self.tab.wait_for_element(element_selector)?;
+        let pagination_el = self.get_pagination_element()?;
         log::info!("Find elements: {element_selector} a");
         for (idx, element) in pagination_el.find_elements("a")?.into_iter().enumerate() {
             log::info!("Get inner text: {element_selector} a.{idx}");
