@@ -574,6 +574,21 @@ impl<'a> GigPage<'a> {
         Ok(())
     }
 
+    fn education_box_btn_selector() -> &'static str {
+        "footer .education-box footer button"
+    }
+
+    async fn close_education_box(&self) -> Result<()> {
+        let element_selector = Self::education_box_btn_selector();
+        log::info!("Find element: {element_selector}");
+        if let Ok(got_it_btn) = self.tab.find_element(element_selector) {
+            log::info!("Click: {element_selector}");
+            got_it_btn.click()?;
+            sleep(Duration::from_secs(BTN_CLICK_WAIT_SECS)).await;
+        }
+        Ok(())
+    }
+
     async fn switch_to_next_gallery_slide(&self) -> Result<()> {
         let element_selector = Self::gallery_next_slide_btn_selector();
         log::info!("Find element: {element_selector}");
@@ -661,6 +676,7 @@ impl<'a> GigPage<'a> {
         let description = self.get_about()?;
         let title = self.get_title()?;
         ModalCloser::close_open_modal(self.tab).await?;
+        self.close_education_box().await?;
         let visuals = self
             .get_visuals()
             .await?
