@@ -15,16 +15,14 @@ use figment::{
     providers::{Format, Yaml},
 };
 use flexi_logger::Logger;
-use headless_chrome::{
-    Browser, Element, Tab,
-    protocol::cdp::{DOM, Runtime::RemoteObject},
-};
+use headless_chrome::{Browser, Element, Tab, protocol::cdp::Runtime::RemoteObject};
 use sqlx::{QueryBuilder, Sqlite, SqlitePool, sqlite::SqliteConnectOptions};
 use tokio::{fs, io::AsyncWriteExt, time::sleep};
 use url::Url;
 use uuid::Uuid;
 
 static BTN_CLICK_WAIT_SECS: u64 = 1;
+static PAGE_RELOAD_WAIT_SECS: u64 = 5;
 static BASE_URL: &str = "https://www.fiverr.com";
 
 struct CustomBrowser {
@@ -756,7 +754,7 @@ impl ErrorPageDetector {
         if Self::is_error_page(tab)? {
             log::info!("Reload tab");
             tab.reload(true, None)?;
-            sleep(Duration::from_secs(BTN_CLICK_WAIT_SECS)).await;
+            sleep(Duration::from_secs(PAGE_RELOAD_WAIT_SECS)).await;
         }
         Ok(())
     }
