@@ -894,6 +894,7 @@ async fn main() -> Result<()> {
         sleep(Duration::from_secs(5)).await;
 
         fiverr_tab = browser.get_fiverr_tab()?;
+        ErrorPageDetector::process(&fiverr_tab).await?;
 
         let gig_page = GigPage::new(&fiverr_tab, gig_page);
         let gig_data = gig_page.scrape().await?;
