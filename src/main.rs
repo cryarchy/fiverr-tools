@@ -257,6 +257,11 @@ struct MenuItemPage<'a> {
     store: Arc<ScrapedGigsStore>,
 }
 
+enum GetTargetPageAnchorElement<'a> {
+    Last(Element<'a>),
+    Target(Element<'a>),
+}
+
 impl<'a> MenuItemPage<'a> {
     fn new(tab: &'a Arc<Tab>, store: Arc<ScrapedGigsStore>) -> Self {
         Self { tab, store }
@@ -351,23 +356,37 @@ impl<'a> MenuItemPage<'a> {
         self.get_parent_element(next_page_btn)
     }
 
-    fn get_target_page_anchor(&'a self, target_page: u32) -> Result<Option<Element<'a>>> {
+    fn get_target_page_anchor(
+        &'a self,
+        target_page: u32,
+    ) -> Result<GetTargetPageAnchorElement<'a>> {
         let element_selector = Self::pagination_selector();
         // log::info!("Wait for element: {element_selector}");
         // let pagination_el = self.tab.wait_for_element(element_selector)?;
         let pagination_el = self.get_pagination_element()?;
         log::info!("Find elements: {element_selector} a");
-        for (idx, element) in pagination_el.find_elements("a")?.into_iter().enumerate() {
-            log::info!("Get inner text: {element_selector} a.{idx}");
+        let mut pagination_items = pagination_el.find_elements("a")?;
+        let last_item = pagination_items
+            .pop()
+            .ok_or(anyhow!("Returned pagination elements list is empty"))?;
+        let is_target = |element: &Element<'_>| {
             let pagination_item_text = element.get_inner_text()?;
             let pagination_item_value = pagination_item_text.trim();
-            if let Ok(pagination_item_value) = pagination_item_value.parse::<u32>()
-                && pagination_item_value == target_page
-            {
-                return Ok(Some(element));
+            match pagination_item_value.parse::<u32>() {
+                Ok(pagination_item_value) => Ok(pagination_item_value == target_page),
+                _ => Result::<_, anyhow::Error>::Ok(false),
+            }
+        };
+        for (idx, element) in pagination_items.into_iter().enumerate() {
+            log::info!("Get inner text: {element_selector} a.{idx}");
+            if is_target(&element)? {
+                return Ok(GetTargetPageAnchorElement::Target(element));
             }
         }
-        Ok(None)
+        match is_target(&last_item)? {
+            true => Ok(GetTargetPageAnchorElement::Target(last_item)),
+            false => Ok(GetTargetPageAnchorElement::Last(last_item)),
+        }
     }
 
     async fn prev_gigs_page(&self) -> Result<()> {
@@ -405,14 +424,18 @@ impl<'a> MenuItemPage<'a> {
                     self.prev_gigs_page().await?;
                 }
                 Ordering::Less => {
-                    if let Some(target_page_a) = self.get_target_page_anchor(page)? {
-                        log::info!("Click: [ref:target_page_a]");
-                        target_page_a.click()?;
-                        self.tab.wait_until_navigated()?;
-                        sleep(Duration::from_secs(BTN_CLICK_WAIT_SECS)).await;
-                    } else {
-                        self.next_gigs_page().await?;
+                    match self.get_target_page_anchor(page)? {
+                        GetTargetPageAnchorElement::Target(target_page_a) => {
+                            log::info!("Click: [ref:target_page_a]");
+                            target_page_a.click()?;
+                        }
+                        GetTargetPageAnchorElement::Last(last_page_a) => {
+                            log::info!("Click: [ref:last_page_a]");
+                            last_page_a.click()?;
+                        }
                     }
+                    self.tab.wait_until_navigated()?;
+                    sleep(Duration::from_secs(BTN_CLICK_WAIT_SECS)).await;
                 }
             }
         }
