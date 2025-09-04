@@ -748,15 +748,16 @@ impl ErrorPageDetector {
         Ok(false)
     }
 
-    async fn process(tab: &Arc<Tab>) -> Result<()> {
+    async fn process(tab: &Arc<Tab>) -> Result<bool> {
         let element_selector = Self::error_code_selector();
         log::info!("Find element: {element_selector}");
         if Self::is_error_page(tab)? {
             log::info!("Reload tab");
             tab.reload(true, None)?;
             sleep(Duration::from_secs(PAGE_RELOAD_WAIT_SECS)).await;
+            return Ok(true);
         }
-        Ok(())
+        Ok(false)
     }
 }
 
@@ -873,7 +874,7 @@ async fn main() -> Result<()> {
     ModalCloser::close_open_modal(&fiverr_tab).await?;
 
     loop {
-        ErrorPageDetector::process(&fiverr_tab).await?;
+        while ErrorPageDetector::process(&fiverr_tab).await? {}
         let fiverr_nav = FiverrNav::new(&fiverr_tab);
 
         fiverr_nav.go_to("programming-tech", "business").await?;
@@ -892,7 +893,7 @@ async fn main() -> Result<()> {
         sleep(Duration::from_secs(5)).await;
 
         fiverr_tab = browser.get_fiverr_tab()?;
-        ErrorPageDetector::process(&fiverr_tab).await?;
+        while ErrorPageDetector::process(&fiverr_tab).await? {}
 
         let gig_page = GigPage::new(&fiverr_tab, gig_page);
         let gig_data = gig_page.scrape().await?;
