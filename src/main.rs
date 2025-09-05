@@ -823,7 +823,14 @@ impl ResourceDownloader {
         let mut results = Vec::new();
 
         for visual in visuals {
-            let file_path = self.download_single_file(&client, &visual.url).await?;
+            let file_path = match self.download_single_file(&client, &visual.url).await {
+                Ok(file_path) => file_path,
+                Err(e) => {
+                    log::error!("Error downloading visual: {}", visual.url);
+                    log::error!("{e}");
+                    continue;
+                }
+            };
             let file_path_str = file_path
                 .to_str()
                 .ok_or(anyhow!("Encountered path without string"))?
