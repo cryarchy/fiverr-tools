@@ -416,6 +416,7 @@ impl<'a> MenuItemPage<'a> {
 
     async fn go_to_page(&self, page: u32) -> Result<()> {
         loop {
+            while ErrorPageDetector::process(self.tab).await? {}
             let current_page = self.get_page_count()?;
             log::debug!("current page: {current_page}");
             match current_page.cmp(&page) {
