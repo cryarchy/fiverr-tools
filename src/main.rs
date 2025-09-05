@@ -361,29 +361,28 @@ impl<'a> MenuItemPage<'a> {
         target_page: u32,
     ) -> Result<GetTargetPageAnchorElement<'a>> {
         let element_selector = Self::pagination_selector();
-        // log::info!("Wait for element: {element_selector}");
-        // let pagination_el = self.tab.wait_for_element(element_selector)?;
         let pagination_el = self.get_pagination_element()?;
         log::info!("Find elements: {element_selector} a");
-        let mut pagination_items = pagination_el.find_elements("a")?;
-        let last_item = pagination_items
-            .pop()
-            .ok_or(anyhow!("Returned pagination elements list is empty"))?;
-        let is_target = |element: &Element<'_>| {
+        let pagination_items = pagination_el.find_elements("a")?;
+        let mut last_item = None;
+
+        let get_pagination_page = |element: &Element<'_>| {
             let pagination_item_text = element.get_inner_text()?;
             let pagination_item_value = pagination_item_text.trim();
-            match pagination_item_value.parse::<u32>() {
-                Ok(pagination_item_value) => Ok(pagination_item_value == target_page),
-                _ => Result::<_, anyhow::Error>::Ok(false),
-            }
+            pagination_item_value
+                .parse::<u32>()
+                .or(Result::<_, anyhow::Error>::Ok(0))
         };
         for (idx, element) in pagination_items.into_iter().enumerate() {
             log::info!("Get inner text: {element_selector} a.{idx}");
-            if is_target(&element)? {
+            if get_pagination_page(&element)? == target_page {
                 return Ok(GetTargetPageAnchorElement::Target(element));
             }
+            last_item = Some(element)
         }
-        match is_target(&last_item)? {
+        let last_item = last_item.ok_or(anyhow!("No pagination with numeric page number found"))?;
+        let last_item_page = get_pagination_page(&last_item)?;
+        match last_item_page == target_page {
             true => Ok(GetTargetPageAnchorElement::Target(last_item)),
             false => Ok(GetTargetPageAnchorElement::Last(last_item)),
         }
