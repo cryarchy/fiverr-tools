@@ -2,6 +2,7 @@ mod app_config;
 
 use std::{
     cmp::Ordering,
+    num::ParseIntError,
     path::{Path, PathBuf},
     str::FromStr,
     sync::Arc,
@@ -369,19 +370,21 @@ impl<'a> MenuItemPage<'a> {
         let get_pagination_page = |element: &Element<'_>| {
             let pagination_item_text = element.get_inner_text()?;
             let pagination_item_value = pagination_item_text.trim();
-            pagination_item_value
-                .parse::<u32>()
-                .or(Result::<_, anyhow::Error>::Ok(0))
+            Result::<_, anyhow::Error>::Ok(pagination_item_value.parse::<u32>().ok())
         };
         for (idx, element) in pagination_items.into_iter().enumerate() {
             log::info!("Get inner text: {element_selector} a.{idx}");
-            if get_pagination_page(&element)? == target_page {
-                return Ok(GetTargetPageAnchorElement::Target(element));
+            if let Ok(Some(pagination_item_page)) = get_pagination_page(&element) {
+                if pagination_item_page == target_page {
+                    return Ok(GetTargetPageAnchorElement::Target(element));
+                } else {
+                    last_item = Some(element);
+                }
             }
-            last_item = Some(element)
         }
+
         let last_item = last_item.ok_or(anyhow!("No pagination with numeric page number found"))?;
-        let last_item_page = get_pagination_page(&last_item)?;
+        let last_item_page = get_pagination_page(&last_item)?.unwrap(); //infallible
         match last_item_page == target_page {
             true => Ok(GetTargetPageAnchorElement::Target(last_item)),
             false => Ok(GetTargetPageAnchorElement::Last(last_item)),
